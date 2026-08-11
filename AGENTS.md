@@ -27,10 +27,47 @@ PENTING: `--remote-allow-origins=*` WAJIB (tanpa itu WebSocket 403). Tanpa env a
 - Update app: `https://assets.profits.co.id/download/profits/latest.json`
 - Referral/daftar: `https://daftar.profits.co.id/` ; share via `api.whatsapp.com/send`
 
-## Auth
+## AUTH (LENGKAP)
+```
+POST /identity/login            login utama (user+password) -> {token:{accessToken, refreshToken, accessExpired}}
+POST /identity/refresh          refresh accessToken
+POST /identity/trade/login      login TRADING pakai PIN {pin}
+POST /identity/trade/refresh    refresh trade token ({refreshToken})
+POST /identity/socket-token/market | /trade   token utk WS
+POST /identity/logout
+GET  /identity/user-detail
+POST /identity/change-password | /identity/change-pin
+POST /identity/forgot-password/request|validate|reset
+POST /identity/bond/token
+```
 - Header: `Authorization: Bearer <accessToken>` (token dari Svelte store `ze.accessToken`)
-- Ada mekanisme refresh token (`refreshUnavailable` flag).
-- Content-Type: application/json (FormData utk upload).
+- Auto-refresh timer: `(accessExpired - 30s)` → panggil refresh dgn refreshToken.
+- Trade session: store `ze.tradeSession` (setTrade dari `/identity/trade/login`).
+
+## ORDER (LENGKAP)
+```
+GET  /portfolio/order                list order
+GET  /portfolio/order/done           history order
+POST /portfolio/order/done/export    export
+POST /portfolio/order                CREATE ORDER (header X-APP-FORM)
+PUT  /portfolio/order/<id>           update
+PUT  /portfolio/order/batch          update batch
+POST /portfolio/order/<id>/cancel    cancel
+```
+Payload createOrder:
+```js
+{qty, gtc: bool, isBuy: bool, split: {count} | 0, useLimit: bool,
+ price, code: <kode saham>, orderType: "limit"|"market"|"trailing-stop",
+ expire?}
+```
+- `X-APP-FORM`: "ro" (regular order) / "so" (sell order?) — dari UI.
+- Automation (SL/TP/trailing/conditional): `/automation/stoploss|takeProfit|trailingStop|conditionalOrder/<id>` + `/automation/<id>/cancel` + `/automation/cancelAll`
+
+## WS streaming (wss://stream.profits.co.id)
+- Subscribe format: `sub|<market>|<symbol>|<res>` (default market="market", pipe-delimited, gaya datafeed)
+- Unsubscribe: `unsub|<market>|<symbol>|<res>`
+- Channel: "price", "order", "portfolio", "trade", "status", "alarm"
+- Perlu token dari `/identity/socket-token/market` & `/trade` (storage: `app-jid`, `app-tjid`)
 
 ## Fitur trading (path API, template literal)
 ```
