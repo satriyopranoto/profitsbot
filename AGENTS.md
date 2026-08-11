@@ -41,6 +41,16 @@ POST /identity/forgot-password/request|validate|reset
 POST /identity/bond/token
 ```
 - Header: `Authorization: Bearer <accessToken>` (token dari Svelte store `ze.accessToken`)
+- ⚠️ LOGIN (TERVERIFIKASI via capture request asli + crypto-js):
+  - password DIENKRIPSI: `CryptoJS.AES.encrypt(password, "1231231231231231")` =
+    OpenSSL salted (prefix `U2FsdGVkX1`): salt 8B acak + AES-256-CBC,
+    KDF EvpKDF `D_i = MD5(D_{i-1} || password || salt)`, blok terakhir saja
+    (bukan akumulasi; urutan password DULU baru salt — beda dari asumsi awal!)
+  - header `authorization: "Bearer"` TANPA spasi saat belum ada token
+    (`"Bearer <token>"` kalau ada token) — 400 "wrong" kalau spasi!
+  - `X-APP-PLATFORM: "windows"` di desktop (dari Tauri OS plugin), bukan "web"
+  - login response: `{data:{user:{...}, token:{accessToken, refreshToken, accessExpired}}}`
+    (token di data.token!)
 - Auto-refresh timer: `(accessExpired - 30s)` → panggil refresh dgn refreshToken.
 - Trade session: store `ze.tradeSession` (setTrade dari `/identity/trade/login`).
 
@@ -63,11 +73,16 @@ Payload createOrder:
 - `X-APP-FORM`: "ro" (regular order) / "so" (sell order?) — dari UI.
 - Automation (SL/TP/trailing/conditional): `/automation/stoploss|takeProfit|trailingStop|conditionalOrder/<id>` + `/automation/<id>/cancel` + `/automation/cancelAll`
 
-## WS streaming (wss://stream.profits.co.id)
-- Subscribe format: `sub|<market>|<symbol>|<res>` (default market="market", pipe-delimited, gaya datafeed)
-- Unsubscribe: `unsub|<market>|<symbol>|<res>`
-- Channel: "price", "order", "portfolio", "trade", "status", "alarm"
+## WS streaming (wss://stream.profits.co.id — TERVERIFIKASI)
+- URL: `wss://stream.profits.co.id/market?key=<socket-token>` (market) /
+  `.../trade?key=` (portfolio/order) — PATH WAJIB, tanpa path server balas "Hello"!
+- Subscribe: `sub|<market>|<channel>|<symbols>` (contoh `sub|market|price|BBCA`)
+  - channel: price / order_book / trade (batch `BBCA,BBRI`) / status (`TRADE`) / alarm
+- Unsubscribe: `unsub|...` format sama
+- Heartbeat DUA ARAH: server kirim `"ping"` -> WAJIB balas `"pong"` (kalau tidak koneksi di-drop);
+  app juga kirim `"ping"` tiap 20s -> server balas `"pong"`
 - Perlu token dari `/identity/socket-token/market` & `/trade` (storage: `app-jid`, `app-tjid`)
+- Server maintenance 22:00-00:05 WIB -> data feed kosong (WS tetap connect, tapi nol pesan)
 
 ## Fitur trading (path API, template literal)
 ```
