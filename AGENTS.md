@@ -53,6 +53,12 @@ POST /identity/bond/token
     (token di data.token!)
 - Auto-refresh timer: `(accessExpired - 30s)` → panggil refresh dgn refreshToken.
 - Trade session: store `ze.tradeSession` (setTrade dari `/identity/trade/login`).
+- ⚠️ PORTFOLIO BUTUH TRADE TOKEN: `/portfolio/*` dipanggil dgn `auth: ze.tradeAccess`
+  (token dari `/identity/trade/login` {pin}) — accessToken biasa -> 401 UNAUTHORIZED.
+  Respons trade/login: `{data:{token:{accessToken,...}}}` (atau data langsung) — TERVERIFIKASI.
+- TERVERIFIKASI: /portfolio/balance -> {totalCash, cash, maxLimit, potensial, multiplier, rdnCash};
+  /portfolio/stock -> [{code, available, total, avgPrice, price, company{...}}];
+  /portfolio/order -> [order aktif].
 
 ## ORDER (LENGKAP)
 ```

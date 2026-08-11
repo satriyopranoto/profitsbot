@@ -61,6 +61,7 @@ def crypto_js_decrypt(cipher_b64, passphrase):
     return pt[:-pt[-1]].decode()
 
 _session = None  # {accessToken, refreshToken, accessExpired}
+_trade_session = None  # {accessToken, refreshToken, ...} dari /identity/trade/login (PIN)
 
 
 def load_env(path=".env"):
@@ -76,7 +77,7 @@ def load_env(path=".env"):
             os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
 
 
-def _req(method, path, payload=None, token=None, app_header=False):
+def _req(method, path, payload=None, token=None, app_header=False, extra=None):
     url = API_BASE + path
     headers = {
         "Content-Type": "application/json",
@@ -89,6 +90,8 @@ def _req(method, path, payload=None, token=None, app_header=False):
     # PENTING (capture request asli app): tanpa token -> "Bearer" (TANPA spasi);
     # dengan token -> "Bearer <token>".
     headers["Authorization"] = f"Bearer {token}" if token else "Bearer"
+    if extra:
+        headers.update(extra)
     data = json.dumps(payload).encode() if payload is not None else None
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
@@ -132,11 +135,20 @@ def generate_market_token():
 
 
 def trade_login(pin):
-    """POST /identity/trade/login {pin} — login trading (utk order nanti)."""
+    """POST /identity/trade/login {pin} — login trading (utk order nanti).
+
+    Hasil disimpan ke _trade_session (token utk /portfolio/* & order).
+    Struktur respons: {data:{token:{...}}} atau {data:{...}} — parse fleksibel.
+    """
+    global _trade_session
     if not _session:
         return {"success": False, "message": "belum login"}
-    return _req("POST", "/identity/trade/login", {"pin": pin},
-                token=_session.get("accessToken"))
+    r = _req("POST", "/identity/trade/login", {"pin": pin},
+             token=_session.get("accessToken"))
+    tok = (r.get("data") or {}).get("token") or (r.get("data") if isinstance(r.get("data"), dict) and r.get("data").get("accessToken") else None)
+    if tok:
+        _trade_session = tok
+    return r
 
 
 if __name__ == "__main__":
