@@ -77,7 +77,16 @@ Payload createOrder:
  expire?}
 ```
 - `X-APP-FORM`: "ro" (regular order) / "so" (sell order?) — dari UI.
-- Automation (SL/TP/trailing/conditional): `/automation/stoploss|takeProfit|trailingStop|conditionalOrder/<id>` + `/automation/<id>/cancel` + `/automation/cancelAll`
+- ⚠️⚠️ CASH ONLY (instruksi USER): JANGAN PERNAH leverage/margin! Payload order
+  desktop TIDAK punya field leverage (fitur "Leverage 2x" khusus app MOBILE —
+  bundle desktop cuma 1x string "Leverage" di UI). Order API = cash/regular.
+  Guard di bot: nilai order WAJIB <= balance.cash (totalCash 15,8jt), BUKAN maxLimit.
+- STOP LOSS payload (dari bundle):
+  POST /automation/stoploss {id, code, triggerPrice, executeQty, executePriceMode,
+    customExecutePrice, expireDate}; PUT /automation/stoploss/<id>; GET list;
+  cancel: POST /automation/<id>/cancel atau /automation/cancelAll.
+  executePriceMode: "market" | "limit" (limit -> customExecutePrice).
+  expireDate ISO; default 90 hari (protokol IDX ≤90 hari).
 
 ## WS streaming (wss://stream.profits.co.id — TERVERIFIKASI)
 - URL: `wss://stream.profits.co.id/market?key=<socket-token>` (market) /

@@ -122,6 +122,10 @@ class ProfitsBot:
     def place_order(self, code, qty, is_buy, price=None, order_type="limit", gtc=False, split=0):
         """Place order. DRY-RUN: log saja. --live: kirim beneran.
 
+        ⚠️ CASH ONLY — JANGAN PERNAH leverage/margin! Payload = persis bundle
+        desktop (tanpa field leverage — fitur itu khusus app MOBILE). Validasi:
+        nilai order WAJIB <= cash real (totalCash), bukan maxLimit/multiplier!
+
         payload (dari bundle): {qty, gtc, isBuy, split, useLimit, price, code, orderType}
         header X-APP-FORM: "ro" (regular order)
         """
@@ -129,8 +133,16 @@ class ProfitsBot:
         payload = {"qty": qty, "gtc": gtc, "isBuy": is_buy, "split": split,
                    "useLimit": use_limit, "price": price, "code": code,
                    "orderType": order_type}
+        order_value = (qty * price) if price else None
+        # guard CASH: nilai order harus <= cash real (tanpa leverage!)
+        if order_value:
+            bal = self.get_balance()
+            cash = (bal.get("data") or {}).get("cash")
+            if cash is not None and order_value > cash:
+                self.log(f"[BLOKIR] order {code} {qty}lbr = Rp{order_value:,.0f} > cash Rp{cash:,.0f} (cash-only!)")
+                return None
         plan = {"symbol": code, "qty": qty, "isBuy": is_buy, "price": price,
-                "type": order_type, "value": (qty * price) if price else "market"}
+                "type": order_type, "value": order_value, "mode": "CASH"}
         if not self.live:
             self.log("[DRY-RUN] ORDER PLAN:", json.dumps(plan, ensure_ascii=False))
             return plan
@@ -141,6 +153,47 @@ class ProfitsBot:
                       extra={"X-APP-FORM": "ro"})
         self.log("[LIVE] order:", json.dumps(req, ensure_ascii=False)[:300])
         return req
+
+    # ---- automation (stop loss / take profit / trailing) ----
+    def set_stop_loss(self, code, trigger_price, qty, execute_price_mode="LAST_PRICE",
+                      custom_execute_price=None, expire_date=None):
+        """Set stop loss: POST /automation/stoploss.
+
+        payload (dari bundle): {id, code, triggerPrice, executeQty,
+        executePriceMode, customExecutePrice, expireDate}
+        executePriceMode: "LAST_PRICE" (TERVERIFIKASI dari SL aktif user) |
+                          "market" | "limit" (limit -> customExecutePrice)
+        expireDate: ISO; default 90 hari (protokol IDX ≤90 hari)
+        """
+        import datetime
+        if expire_date is None:
+            expire_date = (datetime.date.today() + datetime.timedelta(days=90)).isoformat()
+        payload = {"id": "", "code": code, "triggerPrice": trigger_price,
+                   "executeQty": qty, "executePriceMode": execute_price_mode,
+                   "customExecutePrice": custom_execute_price or 0,
+                   "expireDate": expire_date}
+        if not self.live:
+            self.log("[DRY-RUN] STOP LOSS PLAN:", json.dumps(payload, ensure_ascii=False))
+            return payload
+        if not pc._trade_session:
+            self.trade_login()
+        r = pc._req("POST", "/automation/stoploss", payload,
+                    token=pc._trade_session.get("accessToken"))
+        self.log("[LIVE] stop loss:", json.dumps(r, ensure_ascii=False)[:250])
+        return r
+
+    def get_stop_losses(self):
+        if not pc._trade_session:
+            self.trade_login()
+        return pc._req("GET", "/automation/stoploss",
+                       token=pc._trade_session.get("accessToken"))
+
+    def cancel_automation(self, auto_id):
+        """Cancel stop loss / automation: POST /automation/<id>/cancel."""
+        if not pc._trade_session:
+            self.trade_login()
+        return pc._req("POST", f"/automation/{auto_id}/cancel",
+                       token=pc._trade_session.get("accessToken"))
 
     def cancel_order(self, order_id):
         if not pc._trade_session:
