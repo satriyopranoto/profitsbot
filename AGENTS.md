@@ -86,12 +86,13 @@ Payload createOrder (TERVERIFIKASI LIVE 2026-08-12):
   desktop TIDAK punya field leverage (fitur "Leverage 2x" khusus app MOBILE —
   bundle desktop cuma 1x string "Leverage" di UI). Order API = cash/regular.
   Guard di bot: nilai order WAJIB <= balance.cash (totalCash 15,8jt), BUKAN maxLimit.
-- STOP LOSS payload (dari bundle):
-  POST /automation/stoploss {id, code, triggerPrice, executeQty, executePriceMode,
-    customExecutePrice, expireDate}; PUT /automation/stoploss/<id>; GET list;
-  cancel: POST /automation/<id>/cancel atau /automation/cancelAll.
-  executePriceMode: "market" | "limit" (limit -> customExecutePrice).
-  expireDate ISO; default 90 hari (protokol IDX ≤90 hari).
+- STOP LOSS (TERVERIFIKASI LIVE 2026-08-12):
+  POST /automation/stoploss {id:"", code, triggerPrice, executeQty, executePriceMode,
+    customExecutePrice:0, expireDate} -> {data: uuid} ACTIVE. BUTUH POSISI SAHAM.
+  CANCEL: POST /automation/stoploss/<id>/cancel -> {data: uuid} (type WAJIB di URL —
+  /automation/<id>/cancel -> 404!). /automation/stoploss/cancelAll utk semua.
+  executePriceMode: "LAST_PRICE" (terverifikasi dari SL user) — bukan "market"!
+  expireDate ISO; 90 hari = protokol IDX (≤90 hari).
 
 ## WS streaming (wss://stream.profits.co.id — TERVERIFIKASI)
 - URL: `wss://stream.profits.co.id/market?key=<socket-token>` (market) /

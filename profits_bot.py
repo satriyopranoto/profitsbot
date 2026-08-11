@@ -189,11 +189,15 @@ class ProfitsBot:
         return pc._req("GET", "/automation/stoploss",
                        token=pc._trade_session.get("accessToken"))
 
-    def cancel_automation(self, auto_id):
-        """Cancel stop loss / automation: POST /automation/<id>/cancel."""
+    def cancel_automation(self, auto_id, auto_type="stoploss"):
+        """Cancel automation: POST /automation/<type>/<id>/cancel.
+
+        TERVERTIFIKASI: type WAJIB di URL (mis. "stoploss") —
+        /automation/<id>/cancel -> 404 NOT_FOUND!
+        """
         if not pc._trade_session:
             self.trade_login()
-        return pc._req("POST", f"/automation/{auto_id}/cancel",
+        return pc._req("POST", f"/automation/{auto_type}/{auto_id}/cancel",
                        token=pc._trade_session.get("accessToken"))
 
     def cancel_order(self, order_id):
