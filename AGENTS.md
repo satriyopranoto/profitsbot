@@ -107,7 +107,7 @@ Payload createOrder:
 `plugin:http|fetch`, `plugin:fs|*`, `plugin:dialog|save`, `plugin:event|*`, `plugin:image|*`, `plugin:opener|open_*`, `plugin:process|restart_*`
 
 ## Struktur data lokal (Dokumen)
-`C:\Users\satri\OneDrive\Documents\PROFITS\`: `configuration/` (userdata.ini, rsatriyopranoto-config.xml), `log/profits.log`, `updates/ServerController.application`, `workspaces/`.
+`C:\Users\satri\OneDrive\Documents\PROFITS\`: `configuration/` (userdata.ini, [user]-config.xml), `log/profits.log`, `updates/ServerController.application`, `workspaces/`.
 
 ## Obfuscation status
 - Backend Rust = native (no decompile bersih — cuma Ghidra/IDA, susah).
