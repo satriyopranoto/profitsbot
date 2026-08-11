@@ -128,6 +128,8 @@ Payload createOrder:
 - `dump/index_rendered.html` (187KB), `dump/index-BUMcGDRC.js` (1,5MB), `dump/index-CbZLwW9f.css` (131KB)
 
 ## Catatan
+- ⏰ TEST ORDER LIVE = MANUAL oleh user, pas jam pasar (09:00 WIB) — jangan auto-start/
+  jangan pasang cron. Jalankan: `python profits_bot.py --symbols <CODE> --live` (1 lot dulu).
 - profits.exe di Downloads/ (6,3MB) = NSIS installer; profits-setup.exe (104MB) = Inno Setup + UPX — keduanya BUKAN app.
 - App single-instance-ish: kalau instance lama masih jalan, instance baru exit diam-diam (exit 0).
 - Jangan commit kredensial user (userdata.ini bisa berisi data akun).
