@@ -315,6 +315,35 @@ class ProfitsBot:
                 pass
 
     # ---- siklus ----
+    def fetch_ohlc(self, code, interval="15m", range_="5d"):
+        """OHLC asli dari Yahoo Finance (suffix .JK) — interval 1m/5m/15m/1d.
+
+        Yahoo = sumber OHLC asli (chart Profits delay & API-nya cuma close
+        per-menit). Range: 1d (1m) / 5d (5m,15m) / 3mo-1y (1d).
+        Return list dict {t: epoch, o,h,l,c, v} urut waktu.
+        """
+        import urllib.request, urllib.error, time as _t
+        url = (f"https://query1.finance.yahoo.com/v8/finance/chart/{code}.JK"
+               f"?range={range_}&interval={interval}")
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        try:
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                r = json.loads(resp.read().decode())
+        except Exception as e:
+            return {"error": str(e)}
+        res = (r.get("chart", {}).get("result") or [])
+        if not res:
+            return {"error": "kosong"}
+        ts = res[0].get("timestamp") or []
+        q = (res[0].get("indicators", {}).get("quote") or [{}])[0]
+        rows = []
+        for i in range(len(ts)):
+            if q["close"][i] is None:
+                continue
+            rows.append({"t": ts[i], "o": q["open"][i], "h": q["high"][i],
+                         "l": q["low"][i], "c": q["close"][i], "v": q["volume"][i]})
+        return rows
+
     def indicator_snapshot(self, code):
         """Ambil intraday history -> hitung semua indikator (MA/RSI/MACD/Boll/DC)."""
         h = self.intraday_history(code)

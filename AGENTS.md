@@ -150,11 +150,15 @@ Payload createOrder (TERVERIFIKASI LIVE 2026-08-12):
 - Backend Rust = native (no decompile bersih — cuma Ghidra/IDA, susah).
 - Frontend JS = **minified** (Vite standard) — readable tapi nama pendek; TIDAK di-obfuscate sengaja, TIDAK di-encrypt. Asset path string kebaca di binary tapi blob data Tauri format-nya ribet → pakai CDP dump (jauh lebih mudah).
 
-## Indikator (indicators.py — close-based, intraday 1-menit)
-- SMA/EMA/RSI(Wilder)/MACD/Bollinger/Donchian(approx)/ATR(approx) — dari close.
-- ADX butuh OHLC asli — TIDAK tersedia per-menit (chart/price = close-only).
-- `profits_bot.indicator_snapshot(code)` -> trend, rsi_state, dll.
-- Contoh sinyal: BBCA RSI 70+ OVERBOUGHT + MACD hist negatif = momentum melemah.
+## Indikator (indicators.py + OHLC Yahoo .JK)
+- SMA/EMA/RSI/MACD/Bollinger/Donchian/ATR — dari close.
+- ADX LENGKAP (+DI/-DI/ADX, Wilder) dari OHLC asli — adx_full(h,l,c,n).
+- OHLC ASLI = Yahoo Finance: https://query1.finance.yahoo.com/v8/finance/chart/<CODE>.JK
+  ?range=<1d|5d|3mo|1y>&interval=<1m|5m|15m|1d> — TANPA AUTH!
+  -> 15m = 111-145 titik (5 hari), 1d = 244 titik (1 tahun). TERVERIFIKASI.
+  (chart Profits = TradingView iframe delay & API Profits cuma close per-menit 335 titik)
+- `profits_bot.fetch_ohlc(code, interval, range)` & `indicator_snapshot(code)`.
+- Contoh (15m): ANTM +DI 12.95/-DI 25.46/ADX 28.92 DOWN; PTBA ADX 63.15 DOWN kuat.
 
 ## Tools & file di repo ini
 - `cdp_list.py`, `cdp_dump.py`, `cdp_fetch.py` — dump CDP (butuh `websocket-client`; pakai venv protraderbot: `/c/Users/satri/code/protraderbot/.venv/Scripts/python.exe`)

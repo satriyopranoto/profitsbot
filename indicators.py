@@ -113,6 +113,41 @@ def crossover(series_a_last, series_b_last, series_a_prev, series_b_prev):
     return series_a_prev <= series_b_prev and series_a_last > series_b_last
 
 
+def adx_full(high, low, close, n=14):
+    """ADX Wilder lengkap (pdi, mdi, adx) dari OHLC asli.
+
+    Butuh >= 2n bar. +DI/-DI = directional indicators; ADX = smoothed DX.
+    """
+    if len(close) < 2 * n:
+        return None
+    up, dn, tr = [], [], []
+    for i in range(1, len(close)):
+        hm = high[i] - high[i - 1]
+        lm = low[i - 1] - low[i]
+        up.append(hm if (hm > lm and hm > 0) else 0.0)
+        dn.append(lm if (lm > hm and lm > 0) else 0.0)
+        tr.append(max(high[i] - low[i], abs(high[i] - close[i - 1]),
+                      abs(low[i] - close[i - 1])))
+    atr = sum(tr[:n]) / n
+    su = sum(up[:n]) / n
+    sd = sum(dn[:n]) / n
+    dxs = []
+    pdi = mdi = 0.0
+    for i in range(n, len(tr)):
+        atr = (atr * (n - 1) + tr[i]) / n
+        su = (su * (n - 1) + up[i]) / n
+        sd = (sd * (n - 1) + dn[i]) / n
+        pdi = 100 * su / atr if atr else 0.0
+        mdi = 100 * sd / atr if atr else 0.0
+        dxs.append(100 * abs(pdi - mdi) / (pdi + mdi) if (pdi + mdi) else 0.0)
+    if len(dxs) < n:
+        return None
+    adx = sum(dxs[:n]) / n
+    for dx in dxs[n:]:
+        adx = (adx * (n - 1) + dx) / n
+    return {"pdi": round(pdi, 2), "mdi": round(mdi, 2), "adx": round(adx, 2)}
+
+
 def snapshot(closes):
     """Snapshot indikator utk list close — kembalikan dict ringkas."""
     last = closes[-1] if closes else None
