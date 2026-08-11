@@ -21,6 +21,7 @@ import time
 
 import profits_client as pc
 from profits_ws import parse_price
+import indicators as ind
 
 # ------------------------- konfigurasi -------------------------
 SYMBOLS = os.environ.get("PROFITS_SYMBOLS", "BBCA,BBRI,ANTM").split(",")
@@ -314,6 +315,19 @@ class ProfitsBot:
                 pass
 
     # ---- siklus ----
+    def indicator_snapshot(self, code):
+        """Ambil intraday history -> hitung semua indikator (MA/RSI/MACD/Boll/DC)."""
+        h = self.intraday_history(code)
+        if not h:
+            return {"code": code, "error": "tidak ada data"}
+        closes = [x["price"] for x in h]
+        s = ind.snapshot(closes)
+        s["code"] = code
+        s["points"] = len(closes)
+        s["time_first"] = h[0].get("time")
+        s["time_last"] = h[-1].get("time")
+        return s
+
     def run_once(self, symbols=None):
         """Satu siklus: harga semua symbol -> log posisi -> log order plan (DRY-RUN)."""
         symbols = symbols or SYMBOLS
