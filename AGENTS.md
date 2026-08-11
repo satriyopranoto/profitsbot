@@ -70,12 +70,17 @@ PUT  /portfolio/order/<id>           update
 PUT  /portfolio/order/batch          update batch
 POST /portfolio/order/<id>/cancel    cancel
 ```
-Payload createOrder:
+Payload createOrder (TERVERIFIKASI LIVE 2026-08-12):
 ```js
 {qty, gtc: bool, isBuy: bool, split: {count} | 0, useLimit: bool,
  price, code: <kode saham>, orderType: "limit"|"market"|"trailing-stop",
- expire?}
+ expire: "day"}   // WAJIB! tanpa expire -> 400 {"errors":{"expire":[{"tag":"required"}]}}
 ```
+- Respons sukses: `{data: <orderUUID>}`; order terlihat di GET /portfolio/order
+  (status PENDING -> WITHDRAWN kalau di-cancel; cancel: POST /portfolio/order/<id>/cancel
+  -> {data: <uuid>}).
+- ⚠️ SL/automation butuh POSISI: POST /automation/stoploss utk saham yang BELUM
+  dimiliki -> 400 "stock not found" (SL hanya utk saham yang sudah jadi posisi).
 - `X-APP-FORM`: "ro" (regular order) / "so" (sell order?) — dari UI.
 - ⚠️⚠️ CASH ONLY (instruksi USER): JANGAN PERNAH leverage/margin! Payload order
   desktop TIDAK punya field leverage (fitur "Leverage 2x" khusus app MOBILE —

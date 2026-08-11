@@ -132,7 +132,8 @@ class ProfitsBot:
         use_limit = order_type != "market"
         payload = {"qty": qty, "gtc": gtc, "isBuy": is_buy, "split": split,
                    "useLimit": use_limit, "price": price, "code": code,
-                   "orderType": order_type}
+                   "orderType": order_type,
+                   "expire": "day"}  # WAJIB — tanpa expire server tolak 400 ("expire required")
         order_value = (qty * price) if price else None
         # guard CASH: nilai order harus <= cash real (tanpa leverage!)
         if order_value:
