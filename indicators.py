@@ -113,6 +113,48 @@ def crossover(series_a_last, series_b_last, series_a_prev, series_b_prev):
     return series_a_prev <= series_b_prev and series_a_last > series_b_last
 
 
+def adx_series(high, low, close, n=14):
+    """ADX Wilder series — list dict {pdi, mdi, adx} per bar (None utk bar awal).
+
+    Dipakai utk deteksi CROSS: bandingkan bar terakhir vs sebelumnya.
+    pdi/mdi dihitung PER BAR (bukan nilai final) — adx = Wilder-smoothed DX.
+    """
+    out = [None] * len(close)
+    if len(close) < 2 * n + 1:
+        return out
+    up, dn, tr = [], [], []
+    for i in range(1, len(close)):
+        hm = high[i] - high[i - 1]
+        lm = low[i - 1] - low[i]
+        up.append(hm if (hm > lm and hm > 0) else 0.0)
+        dn.append(lm if (lm > hm and lm > 0) else 0.0)
+        tr.append(max(high[i] - low[i], abs(high[i] - close[i - 1]),
+                      abs(low[i] - close[i - 1])))
+    atr = sum(tr[:n]) / n
+    su = sum(up[:n]) / n
+    sd = sum(dn[:n]) / n
+    pdi_list, mdi_list = [], []
+    for i in range(n, len(tr)):
+        atr = (atr * (n - 1) + tr[i]) / n
+        su = (su * (n - 1) + up[i]) / n
+        sd = (sd * (n - 1) + dn[i]) / n
+        pdi_list.append(100 * su / atr if atr else 0.0)
+        mdi_list.append(100 * sd / atr if atr else 0.0)
+    dxs = [100 * abs(a - b) / (a + b) if (a + b) else 0.0
+           for a, b in zip(pdi_list, mdi_list)]
+    if len(dxs) < n:
+        return out
+    adx = sum(dxs[:n]) / n
+    # pdi_list[j] = bar seri index j + n + 1
+    out[n + n] = {"pdi": round(pdi_list[n - 1], 2), "mdi": round(mdi_list[n - 1], 2),
+                  "adx": round(adx, 2)}
+    for j in range(n, len(dxs)):
+        adx = (adx * (n - 1) + dxs[j]) / n
+        out[j + n + 1] = {"pdi": round(pdi_list[j], 2), "mdi": round(mdi_list[j], 2),
+                          "adx": round(adx, 2)}
+    return out
+
+
 def adx_full(high, low, close, n=14):
     """ADX Wilder lengkap (pdi, mdi, adx) dari OHLC asli.
 

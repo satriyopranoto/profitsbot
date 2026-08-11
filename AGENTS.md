@@ -157,6 +157,16 @@ Payload createOrder (TERVERIFIKASI LIVE 2026-08-12):
 - `profits_bot.real_time_price(code)` -> {source: protrader|yahoo, bid, ask, last, vol, ts}.
 - Data indikator OHLC tetap dari Yahoo (delay OK utk MA/ADX 15m/harian).
 
+## STRATEGI SINYAL (terverifikasi 2026-08-12)
+- `signal(code, interval)` — OHLC Yahoo -> ADX series (+DI/-DI/ADX Wilder) + RSI + SMA20:
+  BUY = +DI cross ABOVE -DI (ADX>=15) ATAU +DI>-DI & ADX>=25; filter RSI<75 & close>SMA20
+  SELL = kebalikannya (-DI cross/+DI); filter RSI>25 & close<SMA20
+- `scan_signals(codes=None)` — default scan TOP VALUES 15 (top-stocks) — ~2s utk 15 saham
+- `execute_signals(results, min_score=1, live=False)` — BUY: skip kalau sudah punya posisi
+  (anti-numpuk), harga real-time (fallback chain), GUARD AKUMULASI cash (total plan <= cash);
+  SELL: skip kalau tidak punya posisi, jual 1 lot. DRY-RUN default, --live eksplisit.
+- Contoh scan 15m: BUY JECX/MEDC/MMIX; SELL ANTM/PTBA (bearish kuat).
+
 ## Indikator (indicators.py + OHLC Yahoo .JK)
 - SMA/EMA/RSI/MACD/Bollinger/Donchian/ATR — dari close.
 - ADX LENGKAP (+DI/-DI/ADX, Wilder) dari OHLC asli — adx_full(h,l,c,n).

@@ -386,6 +386,154 @@ class ProfitsBot:
         s["time_last"] = h[-1].get("time")
         return s
 
+    def signal(self, code, interval="15m", range_="5d", adx_n=14):
+        """Analisis sinyal utk 1 saham (OHLC Yahoo).
+
+        BUY : +DI cross ABOVE -DI (golden cross) & ADX>=15  — ATAU  +DI>-DI & ADX>=25
+        SELL: -DI cross ABOVE +DI (death cross) & ADX>=15  — ATAU  -DI>+DI & ADX>=25
+        Filter: RSI wajar + harga vs SMA20 (buy: close>SMA20 utk konfirmasi tren).
+        Return {code, action, score, reasons[], ind{...}}.
+        """
+        ohlc = self.fetch_ohlc(code, interval, range_)
+        if isinstance(ohlc, dict):
+            return {"code": code, "action": "HOLD", "score": 0,
+                    "reasons": [f"data gagal: {ohlc.get('error')}"]}
+        if len(ohlc) < 2 * adx_n + 1:
+            return {"code": code, "action": "HOLD", "score": 0,
+                    "reasons": [f"data kurang ({len(ohlc)} titik)"]}
+        high = [x["h"] for x in ohlc]
+        low = [x["l"] for x in ohlc]
+        close = [x["c"] for x in ohlc]
+        s = ind.adx_series(high, low, close, adx_n)
+        last = s[-1]
+        prev = s[-2]
+        if not last or not prev:
+            return {"code": code, "action": "HOLD", "score": 0,
+                    "reasons": ["indikator belum siap"]}
+        rsi = ind.rsi(close, 14)
+        sma20 = ind.sma(close, 20)
+        close_last = close[-1]
+        cross_up = prev["pdi"] <= prev["mdi"] and last["pdi"] > last["mdi"]
+        cross_dn = prev["mdi"] <= prev["pdi"] and last["mdi"] > last["pdi"]
+
+        action, score, reasons = "HOLD", 0, []
+        ind_snap = {"last": close_last, "pdi": last["pdi"], "mdi": last["mdi"],
+                    "adx": last["adx"], "rsi": rsi, "sma20": sma20}
+        # ---- BUY ----
+        if cross_up and last["adx"] >= 15:
+            action, score = "BUY", 2
+            reasons.append(f"+DI cross ABOVE -DI (golden cross), ADX {last['adx']}")
+        elif last["pdi"] > last["mdi"] and last["adx"] >= 25:
+            action, score = "BUY", 1
+            reasons.append(f"trend bullish (+DI {last['pdi']} > -DI {last['mdi']}, ADX {last['adx']})")
+        if action == "BUY":
+            if rsi and rsi > 75:
+                score -= 1
+                reasons.append(f"RSI {rsi:.0f} overbought (risiko)")
+            if sma20 and close_last < sma20:
+                score -= 1
+                reasons.append(f"harga {close_last} < SMA20 {sma20:.0f}")
+            if score <= 0:
+                action = "HOLD"
+        # ---- SELL ----
+        if action == "HOLD":
+            if cross_dn and last["adx"] >= 15:
+                action, score = "SELL", 2
+                reasons.append(f"-DI cross ABOVE +DI (death cross), ADX {last['adx']}")
+            elif last["mdi"] > last["pdi"] and last["adx"] >= 25:
+                action, score = "SELL", 1
+                reasons.append(f"trend bearish (-DI {last['mdi']} > +DI {last['pdi']}, ADX {last['adx']})")
+            if action == "SELL":
+                if rsi and rsi < 25:
+                    score -= 1
+                    reasons.append(f"RSI {rsi:.0f} oversold (risiko)")
+                if sma20 and close_last > sma20:
+                    score -= 1
+                    reasons.append(f"harga {close_last} > SMA20 {sma20:.0f}")
+                if score <= 0:
+                    action = "HOLD"
+        if action == "HOLD" and not reasons:
+            reasons.append(f"ADX {last['adx']} +DI {last['pdi']} -DI {last['mdi']} RSI {rsi:.0f}")
+        return {"code": code, "action": action, "score": score,
+                "reasons": reasons, "ind": ind_snap, "interval": interval}
+
+    def scan_signals(self, codes=None, interval="15m"):
+        """Scan daftar saham (default: top values 15) -> list sinyal sorted by score."""
+        import urllib.request, urllib.error
+        if codes is None:
+            tv = self.top_values(15)
+            codes = [b["code"] for b in tv]
+        results = []
+        for c in codes:
+            try:
+                results.append(self.signal(c, interval))
+            except Exception as e:
+                results.append({"code": c, "action": "HOLD", "score": 0,
+                                "reasons": [f"err: {e}"]})
+        results.sort(key=lambda r: (r["action"] != "HOLD", -r["score"]))
+        return results
+
+    def execute_signals(self, results, min_score=1, live=False):
+        """Eksekusi sinyal -> order (DRY-RUN default; live hanya dgn flag).
+
+        BUY : place_order limit di harga real-time — SKIP kalau sudah punya posisi
+              (anti-numpuk) — guard cash otomatis di place_order.
+        SELL: place_order jual 1 lot — SKIP kalau tidak punya posisi saham itu.
+        """
+        positions = {}
+        self.live = live  # override mode utk sesi eksekusi ini (DRY-RUN default)
+        try:
+            f = self.flat_positions()
+            positions = {r["code"]: r for r in f.get("rows", [])}
+        except Exception:
+            positions = {}
+        # sisa cash utk guard akumulasi (total order plan <= cash!)
+        cash_left = None
+        try:
+            bal = self.get_balance()
+            cash_left = (bal.get("data") or {}).get("cash")
+        except Exception:
+            pass
+        executed = []
+        for r in results:
+            code = r["code"]
+            if r["action"] == "BUY" and r["score"] >= min_score:
+                if code in positions:
+                    self.log(f"[SKIP] {code} sudah punya posisi ({positions[code]['qty']} lbr) — anti-numpuk")
+                    continue
+                px = self.real_time_price(code)
+                price = px.get("last")
+                if not price:
+                    self.log(f"[SKIP] {code} harga n/a ({px.get('source')})")
+                    continue
+                price = int(round(price))
+                qty_lot = max(int(ORDER_VALUE // (price * 100)), 1)
+                # guard akumulasi: total semua order plan <= cash (anti over-leverage!)
+                if cash_left is not None:
+                    val = qty_lot * 100 * price
+                    if val > cash_left:
+                        self.log(f"[SKIP] {code} Rp{val:,.0f} > sisa cash Rp{cash_left:,.0f} (akumulasi)")
+                        continue
+                    cash_left -= val
+                plan = self.place_order(code, qty_lot, is_buy=True, price=price,
+                                        order_type="limit")
+                if plan:
+                    executed.append(plan)
+            elif r["action"] == "SELL" and r["score"] >= min_score:
+                if code not in positions:
+                    self.log(f"[SKIP] {code} tidak punya posisi — tidak ada yg dijual")
+                    continue
+                px = self.real_time_price(code)
+                price = int(round(px.get("last") or 0))
+                if not price:
+                    self.log(f"[SKIP] {code} harga n/a ({px.get('source')})")
+                    continue
+                plan = self.place_order(code, 1, is_buy=False, price=price,
+                                        order_type="limit")
+                if plan:
+                    executed.append(plan)
+        return executed
+
     def run_once(self, symbols=None):
         """Satu siklus: harga semua symbol -> log posisi -> log order plan (DRY-RUN)."""
         symbols = symbols or SYMBOLS
