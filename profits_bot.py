@@ -27,6 +27,11 @@ import indicators as ind
 SYMBOLS = os.environ.get("PROFITS_SYMBOLS", "BBCA,BBRI,ANTM").split(",")
 PROTRADER_API = os.environ.get("PROTRADER_API", "http://127.0.0.1:8777")  # bot protrader (real-time PMP)
 ORDER_VALUE = float(os.environ.get("PROFITS_ORDER_VALUE", "10000000"))  # cap Rp/order
+CYCLE_MINUTES = float(os.environ.get("PROFITS_CYCLE_MINUTES", "3"))  # loop scan (menit)
+SCAN_INTERVAL = os.environ.get("PROFITS_SCAN_INTERVAL", "15m")  # timeframe sinyal (Yahoo)
+AUTO_EXECUTE = os.environ.get("PROFITS_AUTO_EXECUTE", "0") == "1"  # eksekusi otomatis (DRY-RUN)
+MARKET_OPEN = os.environ.get("PROFITS_MARKET_OPEN", "09:00")  # jam pasar WIB
+MARKET_CLOSE = os.environ.get("PROFITS_MARKET_CLOSE", "15:30")
 LOT_SIZE = 100  # 1 lot = 100 lembar
 MAINT_WINDOW = (22 * 60, 5)  # 22:00-00:05 WIB (server maintenance)
 
@@ -563,17 +568,89 @@ _tok_ts = {"t": 0}
 
 
 # ------------------------- main -------------------------
+def market_open(now=None, open_h=MARKET_OPEN, close_h=MARKET_CLOSE):
+    """True kalau weekday (Sen-Jum) & jam WIB dalam [open, close)."""
+    import datetime as _dt
+    now = now or _dt.datetime.now(_dt.timezone(_dt.timedelta(hours=7)))
+    if now.weekday() >= 5:  # Sabtu/Minggu
+        return False
+    oh, om = map(int, open_h.split(":"))
+    ch, cm = map(int, close_h.split(":"))
+    mins = now.hour * 60 + now.minute
+    return oh * 60 + om <= mins < ch * 60 + cm
+
+
+def run_loop(bot, cycle_minutes=CYCLE_MINUTES, interval=SCAN_INTERVAL,
+             auto_execute=AUTO_EXECUTE, min_score=1):
+    """Loop scan sinyal tiap cycle_minutes (default 3 menit) saat market buka.
+
+    Lapor SINYAL BARU (action/score berubah) — nggak spam yg sama.
+    auto_execute=1 -> execute_signals (DRY-RUN kecuali bot.live).
+    """
+    import time as _t
+    last_state = {}
+    last_plan_hash = None
+    bot.log(f"LOOP start: cycle {cycle_minutes}m | interval {interval} | "
+            f"market {MARKET_OPEN}-{MARKET_CLOSE} WIB | execute={'LIVE' if bot.live else 'DRY-RUN'}")
+    while True:
+        try:
+            if not market_open():
+                bot.log("market CLOSED — tunggu jam pasar...")
+                _t.sleep(60)
+                continue
+            res = bot.scan_signals(interval=interval)
+            new_sig = []
+            for r in res:
+                if r["action"] == "HOLD":
+                    continue
+                key = (r["code"], r["action"])
+                if last_state.get(key) != r["score"]:
+                    last_state[key] = r["score"]
+                    new_sig.append(r)
+                    bot.log(f"SINYAL {r['action']} {r['code']} (skor {r['score']}): {r['reasons'][0]}")
+            if auto_execute and (new_sig or True):
+                act = [r for r in res if r["action"] != "HOLD"]
+                if act:
+                    plans = bot.execute_signals(act, min_score=min_score, live=bot.live)
+                    if plans:
+                        h = hash(tuple(sorted((p["symbol"], p["isBuy"], p["price"]) for p in plans)))
+                        if h != last_plan_hash:
+                            last_plan_hash = h
+                            bot.log(f"ORDER PLAN ({len(plans)}): " + ", ".join(
+                                f"{p['symbol']} {'BUY' if p['isBuy'] else 'SELL'} {p['qty_lot']}lot @{p['price']}"
+                                for p in plans))
+            if not new_sig:
+                bot.log(f"scan ok ({len(res)} saham, tidak ada sinyal baru)")
+        except Exception as e:
+            bot.log(f"loop error: {e}")
+        _t.sleep(max(cycle_minutes * 60, 10))
+
+
 def main():
     live = "--live" in sys.argv
     symbols = None
-    for i, a in enumerate(sys.argv):
-        if a == "--symbols" and i + 1 < len(sys.argv):
-            symbols = sys.argv[i + 1].split(",")
+    loop = "--loop" in sys.argv
+    cycle = CYCLE_MINUTES
+    interval = SCAN_INTERVAL
+    auto_execute = AUTO_EXECUTE
+    args = sys.argv[1:]
+    for i, a in enumerate(args):
+        if a == "--symbols" and i + 1 < len(args):
+            symbols = args[i + 1].split(",")
+        if a == "--cycle" and i + 1 < len(args):
+            cycle = float(args[i + 1])
+        if a == "--interval" and i + 1 < len(args):
+            interval = args[i + 1]
+        if a == "--execute":
+            auto_execute = True
     bot = ProfitsBot(live=live)
     bot.login()
     bot.trade_login()
     if live:
         print("!! LIVE MODE — order akan dikirim beneran !!")
+    if loop:
+        run_loop(bot, cycle_minutes=cycle, interval=interval, auto_execute=auto_execute)
+        return
     bot.run_once(symbols)
     if not live:
         print("\n[DRY-RUN] Tidak ada order dikirim. Untuk live: python profits_bot.py --live")

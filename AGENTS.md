@@ -157,6 +157,14 @@ Payload createOrder (TERVERIFIKASI LIVE 2026-08-12):
 - `profits_bot.real_time_price(code)` -> {source: protrader|yahoo, bid, ask, last, vol, ts}.
 - Data indikator OHLC tetap dari Yahoo (delay OK utk MA/ADX 15m/harian).
 
+## LOOP / RUN (main)
+- `python profits_bot.py --loop [--cycle 3] [--interval 15m] [--execute] [--live]`
+- Config env: PROFITS_CYCLE_MINUTES (3), PROFITS_SCAN_INTERVAL (15m),
+  PROFITS_AUTO_EXECUTE (0/1), PROFITS_MARKET_OPEN/CLOSE (09:00/15:30 WIB, weekday).
+- Loop: scan top values 15 tiap cycle saat market buka; lapor SINYAL BARU (dedup
+  per code+action+score — nggak spam); --execute -> execute_signals (DRY-RUN).
+- market_open() = weekday & jam WIB dalam range.
+
 ## STRATEGI SINYAL (terverifikasi 2026-08-12)
 - `signal(code, interval)` — OHLC Yahoo -> ADX series (+DI/-DI/ADX Wilder) + RSI + SMA20:
   BUY = +DI cross ABOVE -DI (ADX>=15) ATAU +DI>-DI & ADX>=25; filter RSI<75 & close>SMA20
