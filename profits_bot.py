@@ -25,6 +25,7 @@ import indicators as ind
 
 # ------------------------- konfigurasi -------------------------
 SYMBOLS = os.environ.get("PROFITS_SYMBOLS", "BBCA,BBRI,ANTM").split(",")
+PROTRADER_API = os.environ.get("PROTRADER_API", "http://127.0.0.1:8777")  # bot protrader (real-time PMP)
 ORDER_VALUE = float(os.environ.get("PROFITS_ORDER_VALUE", "10000000"))  # cap Rp/order
 LOT_SIZE = 100  # 1 lot = 100 lembar
 MAINT_WINDOW = (22 * 60, 5)  # 22:00-00:05 WIB (server maintenance)
@@ -343,6 +344,34 @@ class ProfitsBot:
             rows.append({"t": ts[i], "o": q["open"][i], "h": q["high"][i],
                          "l": q["low"][i], "c": q["close"][i], "v": q["volume"][i]})
         return rows
+
+    def real_time_price(self, code, timeout=8):
+        """Harga real-time multi-source (fallback chain):
+
+        1. Bot protrader API lokal (http://127.0.0.1:8777/price/<CODE>) — real-time PMP
+           (timeout 8s — pmp_ask di server butuh ~5-6s utk ambil data)
+        2. Yahoo Finance .JK (delay ~10 menit) — kalau bot protrader mati
+        Return {source, bid, ask, last, vol, ts} / {source, error}.
+        """
+        import urllib.request, urllib.error, time as _t
+        # 1) bot protrader (real-time)
+        url = f"{PROTRADER_API}/price/{code}"
+        req = urllib.request.Request(url, headers={"User-Agent": "profitsbot/1.0"})
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                d = json.loads(resp.read().decode())
+            if d.get("last") or d.get("bid") or d.get("ask"):
+                d["source"] = "protrader"
+                return d
+        except Exception:
+            pass
+        # 2) fallback Yahoo (delay)
+        ohlc = self.fetch_ohlc(code, "15m", "5d")
+        if isinstance(ohlc, list) and ohlc:
+            last = ohlc[-1]
+            return {"source": "yahoo", "bid": None, "ask": None,
+                    "last": last["c"], "vol": last["v"], "ts": last["t"]}
+        return {"source": "none", "error": "semua sumber gagal"}
 
     def indicator_snapshot(self, code):
         """Ambil intraday history -> hitung semua indikator (MA/RSI/MACD/Boll/DC)."""

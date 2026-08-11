@@ -150,6 +150,13 @@ Payload createOrder (TERVERIFIKASI LIVE 2026-08-12):
 - Backend Rust = native (no decompile bersih — cuma Ghidra/IDA, susah).
 - Frontend JS = **minified** (Vite standard) — readable tapi nama pendek; TIDAK di-obfuscate sengaja, TIDAK di-encrypt. Asset path string kebaca di binary tapi blob data Tauri format-nya ribet → pakai CDP dump (jauh lebih mudah).
 
+## ARSITEKTUR DATA (fallback chain real-time)
+- Bot Profits tanya harga real-time -> bot PROTRADER (http://127.0.0.1:8777/price/<CODE>)
+  — protraderbot/bot/api_server.py (PMP real-time: bid/ask/last) — timeout 8s.
+- Kalau bot protrader mati/nggak jawab -> fallback YAHOO .JK (delay ~10 menit).
+- `profits_bot.real_time_price(code)` -> {source: protrader|yahoo, bid, ask, last, vol, ts}.
+- Data indikator OHLC tetap dari Yahoo (delay OK utk MA/ADX 15m/harian).
+
 ## Indikator (indicators.py + OHLC Yahoo .JK)
 - SMA/EMA/RSI/MACD/Bollinger/Donchian/ATR — dari close.
 - ADX LENGKAP (+DI/-DI/ADX, Wilder) dari OHLC asli — adx_full(h,l,c,n).
