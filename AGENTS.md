@@ -76,6 +76,12 @@ Payload createOrder (TERVERIFIKASI LIVE 2026-08-12):
  price, code: <kode saham>, orderType: "limit"|"market"|"trailing-stop",
  expire: "day"}   // WAJIB! tanpa expire -> 400 {"errors":{"expire":[{"tag":"required"}]}}
 ```
+- ⚠️⚠️⚠️ qty = dalam LOT (1 lot = 100 lembar) utk BUY & SELL — TERVERIFIKASI LIVE:
+  qty=1 -> total = price*100. Kirim qty=100 (anggap lembar) = 100 LOT!
+  (buy ANTM 100 -> total 30,9jt — LEVERAGE implicit kalau > cash tapi <= maxLimit!)
+  SELL qty=100 (100 lot) -> 400 "insufficient balance" (posisi 31 lot).
+- X-APP-FORM: "ro" (regular order, buy & sell) — "so" juga diterima utk sell.
+- Buy/sell limit di luar jam pasar = masuk antrian PENDING, eksekusi saat market buka.
 - Respons sukses: `{data: <orderUUID>}`; order terlihat di GET /portfolio/order
   (status PENDING -> WITHDRAWN kalau di-cancel; cancel: POST /portfolio/order/<id>/cancel
   -> {data: <uuid>}).

@@ -119,31 +119,37 @@ class ProfitsBot:
         return pc._req("GET", "/portfolio/order", token=pc._trade_session.get("accessToken") if pc._trade_session else None)
 
     # ---- order ----
-    def place_order(self, code, qty, is_buy, price=None, order_type="limit", gtc=False, split=0):
+    def place_order(self, code, qty_lot, is_buy, price=None, order_type="limit", gtc=False, split=0):
         """Place order. DRY-RUN: log saja. --live: kirim beneran.
+
+        ⚠️⚠️ qty = dalam LOT (1 lot = 100 lembar) — TERVERIFIKASI LIVE!
+        (qty=1 -> total = price*100; qty=100 = 100 LOT = 30,9jt utk ANTM 3090!)
+        JANGAN kirim lembar — sell qty=100 ditolak "insufficient balance".
 
         ⚠️ CASH ONLY — JANGAN PERNAH leverage/margin! Payload = persis bundle
         desktop (tanpa field leverage — fitur itu khusus app MOBILE). Validasi:
-        nilai order WAJIB <= cash real (totalCash), bukan maxLimit/multiplier!
+        nilai order (qty_lot*100*price) WAJIB <= cash real (totalCash), bukan
+        maxLimit/multiplier (kalau <= maxLimit tapi > cash = LEVERAGE implicit!).
 
         payload (dari bundle): {qty, gtc, isBuy, split, useLimit, price, code, orderType}
         header X-APP-FORM: "ro" (regular order)
         """
         use_limit = order_type != "market"
-        payload = {"qty": qty, "gtc": gtc, "isBuy": is_buy, "split": split,
+        payload = {"qty": qty_lot, "gtc": gtc, "isBuy": is_buy, "split": split,
                    "useLimit": use_limit, "price": price, "code": code,
                    "orderType": order_type,
                    "expire": "day"}  # WAJIB — tanpa expire server tolak 400 ("expire required")
-        order_value = (qty * price) if price else None
-        # guard CASH: nilai order harus <= cash real (tanpa leverage!)
+        order_value = (qty_lot * 100 * price) if price else None
+        # guard CASH: nilai order (dalam RUPIAH) harus <= cash real (tanpa leverage!)
         if order_value:
             bal = self.get_balance()
             cash = (bal.get("data") or {}).get("cash")
             if cash is not None and order_value > cash:
-                self.log(f"[BLOKIR] order {code} {qty}lbr = Rp{order_value:,.0f} > cash Rp{cash:,.0f} (cash-only!)")
+                self.log(f"[BLOKIR] order {code} {qty_lot}lot = Rp{order_value:,.0f} > cash Rp{cash:,.0f} (cash-only!)")
                 return None
-        plan = {"symbol": code, "qty": qty, "isBuy": is_buy, "price": price,
-                "type": order_type, "value": order_value, "mode": "CASH"}
+        plan = {"symbol": code, "qty_lot": qty_lot, "qty_lbr": qty_lot * 100,
+                "isBuy": is_buy, "price": price, "type": order_type,
+                "value": order_value, "mode": "CASH"}
         if not self.live:
             self.log("[DRY-RUN] ORDER PLAN:", json.dumps(plan, ensure_ascii=False))
             return plan
@@ -280,8 +286,8 @@ class ProfitsBot:
             if not cur or not prev:
                 continue
             if cur <= prev * 0.99 and not in_maintenance():
-                qty = int(max(ORDER_VALUE // (cur * LOT_SIZE), 1) * LOT_SIZE)
-                self.place_order(code, qty, is_buy=True, price=cur, order_type="limit")
+                qty_lot = max(int(ORDER_VALUE // (cur * 100)), 1)  # dalam LOT
+                self.place_order(code, qty_lot, is_buy=True, price=cur, order_type="limit")
         return True
 
 
