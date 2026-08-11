@@ -93,7 +93,10 @@ Payload createOrder:
 /automation/stoploss/<id>  takeProfit/<id>  trailingStop/<id>
 /automation/<id>/cancel   /automation/cancelAll
 /catalog/order-queue/<x>[/<y>]          antrian order
-/catalog/company/<code>[/profile|/price|/order-book]
+/catalog/company/<code>[/profile|/price|/order-book]  ← HARGA REST TERVERIFIKASI:
+  GET /catalog/company/<CODE>/price -> {current, prev, change, open, high, low} — jalan 24/7
+  (data sesi masih ada sampai di-clear 08:00 WIB; WS hanya kirim saat ada perubahan harga)
+  GET /trade-book/trade-book/<CODE>/price -> market depth (bid/offer per price level)
 /trade-book/trade-book/<code>/price|time|chart
 /trade-book/mover/<x>
 /workspace/watchlist/<id>[/rename]      watchlist
