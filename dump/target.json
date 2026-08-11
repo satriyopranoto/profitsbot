@@ -1,0 +1,10 @@
+{
+  "description": "",
+  "devtoolsFrontendUrl": "https://aka.ms/docs-landing-page/serve_rev/@dd5b3842e0c9ebf2331716f97717cbf3bb5135e2/inspector.html?ws=localhost:9222/devtools/page/EAC94430E059CA009C0CC4DCC7BC95AE",
+  "faviconUrl": "http://tauri.localhost/favicon.ico",
+  "id": "EAC94430E059CA009C0CC4DCC7BC95AE",
+  "title": "Profits",
+  "type": "page",
+  "url": "http://tauri.localhost/",
+  "webSocketDebuggerUrl": "ws://localhost:9222/devtools/page/EAC94430E059CA009C0CC4DCC7BC95AE"
+}
