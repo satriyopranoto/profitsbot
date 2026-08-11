@@ -100,7 +100,55 @@ class ProfitsBot:
             self.log("trade login GAGAL:", json.dumps(r, ensure_ascii=False)[:200])
         return pc._trade_session
 
-    # ---- data ----
+    # ---- data pasar ----
+    def top_values(self, n=15):
+        """Top values: /trade-book/trade-book/top-stocks — sort by nilai (val).
+
+        Format: [{buy: {code, curr, change, val, freq, lot, avg}, sell: {...}}]
+        Ambil item teratas dari sisi buy (val terbesar).
+        """
+        r = pc._req("GET", "/trade-book/trade-book/top-stocks", token=self.ensure_token())
+        items = r.get("data") or []
+        rows = []
+        for it in items:
+            b = it.get("buy") or {}
+            rows.append((b.get("val") or 0, b))
+        rows.sort(key=lambda x: x[0], reverse=True)
+        return [b for _, b in rows[:n]]
+
+    def intraday_history(self, code):
+        """Harga intraday per menit (sesi terakhir, ~335 titik).
+
+        /trade-book/chart/<CODE>/price?cursor=<ts> -> [{time, price}, ...]
+        Bisa dipakai utk indikator intraday (MA/RSI/ADX dari close 1-menit).
+        """
+        import time as _t
+        path = f"/trade-book/chart/{code}/price?cursor={int(_t.time())}"
+        r = pc._req("GET", path, token=self.ensure_token())
+        return (r.get("data") or []) if isinstance(r, dict) else r
+
+    def flat_positions(self):
+        """Flat (floating P/L) per posisi + total.
+
+        /portfolio/stock -> [{code, available, total, avgPrice, price, company}]
+        flat = (current - avgPrice) * total
+        """
+        if not pc._trade_session:
+            self.trade_login()
+        r = pc._req("GET", "/portfolio/stock",
+                    token=pc._trade_session.get("accessToken"))
+        rows = []
+        tot = 0.0
+        for x in (r.get("data") or []):
+            cur = x.get("price") or 0
+            avg = x.get("avgPrice") or 0
+            qty = x.get("total") or 0
+            flat = (cur - avg) * qty
+            tot += flat
+            rows.append({"code": x["code"], "qty": qty, "avg": avg,
+                         "current": cur, "flat": round(flat)})
+        rows.sort(key=lambda z: z["flat"])
+        return {"rows": rows, "total_flat": round(tot)}
     def get_price(self, code):
         """Harga terakhir via REST (jalan 24/7)."""
         r = pc._req("GET", f"/catalog/company/{code}/price", token=self.ensure_token())

@@ -124,6 +124,13 @@ Payload createOrder (TERVERIFIKASI LIVE 2026-08-12):
   GET /catalog/company/<CODE>/price -> {current, prev, change, open, high, low} — jalan 24/7
   (data sesi masih ada sampai di-clear 08:00 WIB; WS hanya kirim saat ada perubahan harga)
   GET /trade-book/trade-book/<CODE>/price -> market depth (bid/offer per price level)
+- DATA PASAR (TERVERIFIKASI):
+  GET /trade-book/trade-book/top-stocks -> [{buy:{code,curr,change,val,freq,lot,avg}, sell:{...}}]
+    (50 item; sort val -> TOP VALUES 15)
+  GET /trade-book/chart/<CODE>/price?cursor=<ts> -> [{time:'HH:MM', price}] intraday per menit
+    (sesi terakhir ~335 titik — utk indikator intraday)
+  GET /trade-book/trade-book/<CODE>/chart|time -> depth/bid-offer per waktu
+  Flat: dari /portfolio/stock (avgPrice vs price) x total
 /trade-book/trade-book/<code>/price|time|chart
 /trade-book/mover/<x>
 /workspace/watchlist/<id>[/rename]      watchlist
