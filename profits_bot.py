@@ -499,8 +499,9 @@ class ProfitsBot:
                     "reasons": [f"DISCRETE: {flat_pct:.0f}% bar flat (max {MAX_FLAT_PCT:.0f}%)"],
                     "ind": ind_snap, "interval": interval}
         # ---- sinyal PERSIS protraderbot (signal_buy / signal_sell) ----
-        # BUY : low>SL & close>SMA20 & ADX>thresh & ADX naik(5) & +DI>-DI & +DI naik(5)
-        # SELL: high<SL & close<SMA20 & ADX>thresh & ADX naik(5) & -DI>+DI & -DI naik(5)
+        # BUY  : low>SL & close>SMA20 & ADX>thresh & ADX naik(5) & +DI>-DI & +DI naik(5)
+        # SHORT: high<SL & close<SMA20 & ADX>thresh & ADX naik(5) & -DI>+DI & -DI naik(5)
+        #        (sinyal bearish = SHORT — DI SINI = pemicu EXIT LONG, IDX cash ga bisa short)
         i = len(close) - 1
         s6 = s[-6] if len(s) >= 6 else None
         lookback = max(int(2.8 * DONCHIAN_PERIOD), 5)  # SL Donchian (2.8x period)
@@ -517,9 +518,9 @@ class ProfitsBot:
             elif (high[i] < sl_lower and close[i] < sma20
                     and last["adx"] > adx_thresh and last["adx"] > s6["adx"]
                     and last["mdi"] > last["pdi"] and last["mdi"] > s6["mdi"]):
-                action, score = "SELL", 1
+                action, score = "SHORT", 1
                 reasons.append(
-                    f"SELL: high {high[i]:.0f}<SL {sl_lower:.0f}, close {close[i]:.0f}<SMA20 {sma20:.0f}, "
+                    f"SHORT: high {high[i]:.0f}<SL {sl_lower:.0f}, close {close[i]:.0f}<SMA20 {sma20:.0f}, "
                     f"ADX {last['adx']:.1f}>{adx_thresh:.0f} & naik, -DI {last['mdi']:.1f}>+DI {last['pdi']:.1f} & naik")
         if action == "HOLD" and not reasons:
             reasons.append(f"ADX {last['adx']} +DI {last['pdi']} -DI {last['mdi']} RSI {rsi:.0f}")
@@ -552,7 +553,7 @@ class ProfitsBot:
                                 "reasons": [f"err: {e}"], "value": values.get(c, 0)})
         # ranking PERSIS stocktrade screener (line 2513 app.py):
         #   sort by (rekomendasi, adx_sma_pct = statistic bullish, value) desc
-        action_rank = {"BUY": 3, "SELL": 2, "HOLD": 0}
+        action_rank = {"BUY": 3, "SHORT": 2, "HOLD": 0}
         results.sort(key=lambda r: (
             action_rank.get(r["action"], 0),
             (r.get("ind") or {}).get("adx_sma_pct", 0) or 0,
@@ -651,9 +652,12 @@ class ProfitsBot:
                     if sl_price:
                         plan["sl_donchian"] = sl_price
                         self.log(f"  SL plan {code}: trigger {sl_price} (lookback {sl.get('lookback')} bar, Donchian lower {sl.get('lower')})")
-            elif r["action"] == "SELL" and r["score"] >= min_score:
+            elif r["action"] == "SHORT" and r["score"] >= min_score:
+                code = r["code"]
+                # sinyal SHORT = pemicu EXIT LONG (IDX cash-only: ga bisa short beneran)
+                # -> jual posisi yang dipunya; kalau tidak punya -> skip
                 if code not in positions:
-                    self.log(f"[SKIP] {code} tidak punya posisi — tidak ada yg dijual")
+                    self.log(f"[SKIP] {code} sinyal SHORT tapi tidak punya posisi — exit long skip (ga bisa short cash IDX)")
                     continue
                 px = self.real_time_price(code)
                 price = int(round(px.get("last") or 0))
@@ -663,6 +667,7 @@ class ProfitsBot:
                 # FLIP=1 -> tutup posisi penuh; default -> jual 1 lot (test/trim)
                 avail = positions[code].get("qty") or 0
                 qty_lot = max(avail // 100, 1) if FLIP else 1
+                self.log(f"  EXIT LONG {code}: sinyal SHORT -> jual {qty_lot} lot ({'penuh' if FLIP else '1 lot'})")
                 plan = self.place_order(code, qty_lot, is_buy=False, price=price,
                                         order_type="limit")
                 if plan:
