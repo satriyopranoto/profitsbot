@@ -186,10 +186,13 @@ class ProfitsBot:
         rows.sort(key=lambda z: z["flat"])
         return {"rows": rows, "total_flat": round(tot)}
     def check_exit(self, tp_pct=0.5):
-        """Exit check — TAKE PROFIT dari holding (ala protraderbot exit_check).
+        """Exit check — TAKE PROFIT trailing (persis protraderbot exit_check).
 
-        Untuk tiap posisi: floating profit > tp_pct (%) -> SELL (jual available).
-        Return list {code, qty_lot, price, avg, flat_pct} — urut profit terbesar.
+        SELL jika: floating_pct > tp_pct  AND  close < sl (Donchian trailing).
+        - floating_pct = (current - avg) / avg * 100   (avg dari holding)
+        - sl = Donchian SL terbaru (trailing trigger — harga balik tembus SL)
+        Jadi profit > 0,5% BELUM dijual — baru jual kalau harga BALIK tembus SL
+        (profit dikunci dari atas). BUKAN jual langsung di +0,5%!
         """
         f = self.flat_positions()
         exits = []
@@ -198,9 +201,18 @@ class ProfitsBot:
             if qty <= 0 or avg <= 0 or cur <= 0:
                 continue
             flat_pct = (cur - avg) / avg * 100
-            if flat_pct > tp_pct:
-                exits.append({"code": r["code"], "qty_lot": max(int(qty // 100), 1),
-                              "price": cur, "avg": avg, "flat_pct": round(flat_pct, 2)})
+            if flat_pct <= tp_pct:
+                continue  # syarat 1: floating > tp_pct
+            # syarat 2 (AND): close < SL Donchian (trailing trigger)
+            sl = self.sl_donchian_plan(r["code"], SCAN_INTERVAL)
+            sl_price = sl.get("trigger") if sl and "trigger" in sl else None
+            if sl_price is None:
+                continue  # SL n/a -> jangan jual (fail-safe)
+            if cur >= sl_price:
+                continue  # harga BELUM balik tembus SL -> HOLD (trailing berjalan)
+            exits.append({"code": r["code"], "qty_lot": max(int(qty // 100), 1),
+                          "price": cur, "avg": avg, "flat_pct": round(flat_pct, 2),
+                          "sl": sl_price})
         exits.sort(key=lambda z: -z["flat_pct"])
         return exits
 
