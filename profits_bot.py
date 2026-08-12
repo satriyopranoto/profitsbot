@@ -265,8 +265,9 @@ class ProfitsBot:
                    "orderType": order_type,
                    "expire": "day"}  # WAJIB — tanpa expire server tolak 400 ("expire required")
         order_value = (qty_lot * 100 * price) if price else None
-        # guard CASH: nilai order (dalam RUPIAH) harus <= cash real (tanpa leverage!)
-        if order_value:
+        # guard CASH: HANYA utk BUY — nilai order (RUPIAH) harus <= cash real.
+        # SELL (jual) TIDAK butuh cash (malah menambah cash) — jangan di-blokir!
+        if order_value and is_buy:
             bal = self.get_balance()
             cash = (bal.get("data") or {}).get("cash")
             if cash is not None and order_value > cash:
