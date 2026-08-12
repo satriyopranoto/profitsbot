@@ -58,6 +58,8 @@ RISK_PCT = float(os.environ.get("PROFITS_RISK_PCT", "1.0"))  # risk per posisi (
 ORDER_VALUE = float(os.environ.get("PROFITS_ORDER_VALUE", "0"))  # budget/order (0 = sizing + sisa cash)
 SL_DONCHIAN_PERIOD = int(os.environ.get("PROFITS_SL_DONCHIAN_PERIOD", str(DONCHIAN_PERIOD)))
 FLIP = USE_FLIP
+BUY_UPTREND_ONLY = os.environ.get("PROFITS_BUY_UPTREND_ONLY", "1") == "1"  # buy HANYA uptrend kuat
+UPTREND_MIN_PCT = float(os.environ.get("PROFITS_UPTREND_MIN_PCT", "35"))  # ambang adx_sma_pct
 LOT_SIZE = 100  # 1 lot = 100 lembar
 MAINT_WINDOW = (22 * 60, 5)  # 22:00-00:05 WIB (server maintenance)
 
@@ -568,8 +570,13 @@ class ProfitsBot:
             pass
         executed = []
         for r in results:
-            code = r["code"]
             if r["action"] == "BUY" and r["score"] >= min_score:
+                code = r["code"]
+                # syarat buy: HANYA uptrend kuat (statistic bullish >= UPTREND_MIN_PCT)
+                ind_s = r.get("ind") or {}
+                if BUY_UPTREND_ONLY and (ind_s.get("adx_sma_pct") or 0) < UPTREND_MIN_PCT:
+                    self.log(f"[SKIP] {code} bukan uptrend kuat (bullish {ind_s.get('adx_sma_pct')}% < {UPTREND_MIN_PCT:.0f}%) — buy hanya uptrend kuat")
+                    continue
                 if code in positions:
                     self.log(f"[SKIP] {code} sudah punya posisi ({positions[code]['qty']} lbr) — anti-numpuk")
                     continue
