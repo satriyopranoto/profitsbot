@@ -49,7 +49,8 @@ USE_FLIP = os.environ.get("PROFITS_FLIP", os.environ.get("PROFITS_USE_FLIP", "1"
 CYCLE_MINUTES = float(os.environ.get("PROFITS_CYCLE_MINUTES", "3"))  # loop scan (menit)
 SCAN_INTERVAL = os.environ.get("PROFITS_SCAN_INTERVAL", "15m")  # timeframe sinyal (Yahoo)
 AUTO_EXECUTE = os.environ.get("PROFITS_AUTO_EXECUTE", "0") == "1"  # eksekusi otomatis (DRY-RUN)
-MARKET_OPEN = os.environ.get("PROFITS_MARKET_OPEN", "09:00")  # jam pasar WIB
+MARKET_HOURS = os.environ.get("PROFITS_MARKET_HOURS", "0") == "1"  # 0 = 24 jam (testing); 1 = cuma jam bursa
+MARKET_OPEN = os.environ.get("PROFITS_MARKET_OPEN", "09:00")  # jam pasar WIB (kalau MARKET_HOURS=1)
 MARKET_CLOSE = os.environ.get("PROFITS_MARKET_CLOSE", "15:30")
 # --- sizing / risk ---
 CAPITAL = float(os.environ.get("PROFITS_CAPITAL", "100000000"))  # modal default 100 jt
@@ -652,7 +653,9 @@ _tok_ts = {"t": 0}
 
 # ------------------------- main -------------------------
 def market_open(now=None, open_h=MARKET_OPEN, close_h=MARKET_CLOSE):
-    """True kalau weekday (Sen-Jum) & jam WIB dalam [open, close)."""
+    """True kalau MARKET_HOURS=0 (24 jam — testing) ATAU weekday & jam WIB dalam [open, close)."""
+    if not MARKET_HOURS:
+        return True  # 24 jam — bisa test di luar jam bursa
     import datetime as _dt
     now = now or _dt.datetime.now(_dt.timezone(_dt.timedelta(hours=7)))
     if now.weekday() >= 5:  # Sabtu/Minggu
@@ -674,7 +677,8 @@ def run_loop(bot, cycle_minutes=CYCLE_MINUTES, interval=SCAN_INTERVAL,
     last_state = {}
     last_plan_hash = None
     bot.log(f"LOOP start: cycle {cycle_minutes}m | interval {interval} | "
-            f"market {MARKET_OPEN}-{MARKET_CLOSE} WIB | execute={'LIVE' if bot.live else 'DRY-RUN'}")
+            f"market {'24 JAM (testing)' if not MARKET_HOURS else f'{MARKET_OPEN}-{MARKET_CLOSE} WIB'} | "
+            f"execute={'LIVE' if bot.live else 'DRY-RUN'}")
     while True:
         try:
             if not market_open():
