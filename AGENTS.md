@@ -216,6 +216,13 @@ Payload createOrder (TERVERIFIKASI LIVE 2026-08-12):
   -> {bids:[{price,...}], offers:[...]} — best bid = bids[0].price, best ask = offers[0].price.
 - **SHORT (sinyal) vs SELL (exit long)**: SHORT = sinyal bearish -> pemicu EXIT LONG (jual posisi yg
   dipunya); SELL = tindakan exit long dari TP check. Guard cash HANYA utk BUY (SELL tidak diblokir!).
+- **FLIP toggle** (`PROFITS_FLIP`, default 1): FLIP=1 -> exit = (fl>0.5% AND close<SL) **OR** sinyal
+  SHORT (SHORT exit aktif, jual penuh); FLIP=0 -> SHORT di-SKIP, exit HANYA TP trailing. Nama lama
+  PROFITS_USE_FLIP dihapus (jangan dipakai lagi).
+- **⚠️ SL plan vs SL terpasang**: execute_signals BUY cuma LOG "SL plan CODE: trigger X" — automation
+  stoploss TIDAK otomatis terpasang! Set manual via `set_stop_loss(code, trigger, qty_lot)` (POST
+  /automation/stoploss, executePriceMode LAST_PRICE, expire +60 hari) — VERIFIKASI LIVE 2026-08-12:
+  ISAT 2099 (960053f2), BREN 3269 (ab2d5d70), EXCL 2409 (e5e326b8), CUAN 674 (2c73806b).
 - Contoh scan 15m: BUY JECX/MEDC/MMIX; SHORT ANTM/PTBA (bearish kuat).
 
 ## Loop & keselamatan (2026-08-12 — pelajaran mahal!)
