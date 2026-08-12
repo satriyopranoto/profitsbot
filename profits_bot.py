@@ -224,13 +224,24 @@ class ProfitsBot:
         return d
 
     def get_balance(self):
+        if not pc._trade_session:
+            self.trade_login()
         return pc._req("GET", "/portfolio/balance", token=pc._trade_session.get("accessToken") if pc._trade_session else None)
 
     def get_stocks(self):
+        if not pc._trade_session:
+            self.trade_login()
         return pc._req("GET", "/portfolio/stock", token=pc._trade_session.get("accessToken") if pc._trade_session else None)
 
     def get_orders(self):
+        if not pc._trade_session:
+            self.trade_login()
         return pc._req("GET", "/portfolio/order", token=pc._trade_session.get("accessToken") if pc._trade_session else None)
+
+    def get_orders_done(self):
+        if not pc._trade_session:
+            self.trade_login()
+        return pc._req("GET", "/portfolio/order/done", token=pc._trade_session.get("accessToken") if pc._trade_session else None)
 
     # ---- order ----
     def place_order(self, code, qty_lot, is_buy, price=None, order_type="limit", gtc=False, split=0):
@@ -273,7 +284,12 @@ class ProfitsBot:
                       token=pc._trade_session.get("accessToken"),
                       extra={"X-APP-FORM": "ro"})
         self.log("[LIVE] order:", json.dumps(req, ensure_ascii=False)[:300])
-        return req
+        if req and req.get("data"):  # sukses -> {data: <orderUUID>}
+            plan["order_id"] = req["data"]
+            plan["mode"] = "LIVE"
+            return plan
+        self.log(f"[LIVE] order GAGAL {code}: {json.dumps(req, ensure_ascii=False)[:200]}")
+        return None
 
     # ---- automation (stop loss / take profit / trailing) ----
     def set_stop_loss(self, code, trigger_price, qty, execute_price_mode="LAST_PRICE",
@@ -783,6 +799,18 @@ def run_loop(bot, cycle_minutes=CYCLE_MINUTES, interval=SCAN_INTERVAL,
                                 f"SELL {p['symbol']} {p['qty_lot']}lot @{p['price']}" for p in plans))
             except Exception as e:
                 bot.log(f"exit check error: {e}")
+            # HOLDING — log posisi saat ini (biar keliatan bot jalan)
+            try:
+                f = bot.flat_positions()
+                if f["rows"]:
+                    bot.log(f"HOLDING ({len(f['rows'])}): " + " | ".join(
+                        f"{r['code']} {max(r['qty'] // 100, 1)}lot avg{r['avg']:.0f} "
+                        f"cur{r['current']:.0f} {r['flat']:+,.0f}"
+                        for r in f["rows"][:8]) + f" | flat {f['total_flat']:+,.0f}")
+                else:
+                    bot.log("HOLDING: 0 posisi")
+            except Exception as e:
+                bot.log(f"holding log error: {e}")
             if not new_sig:
                 bot.log(f"scan ok ({len(res)} saham, tidak ada sinyal baru)")
         except Exception as e:
