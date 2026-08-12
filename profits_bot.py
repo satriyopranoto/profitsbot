@@ -204,21 +204,33 @@ class ProfitsBot:
         exits.sort(key=lambda z: -z["flat_pct"])
         return exits
 
-    def best_bid(self, code):
-        """Best bid (harga beli tertinggi) via order-book — utk jual DI BID.
+    def order_book(self, code):
+        """Bid/ask bersih via /catalog/company/<CODE>/order-book.
 
-        /trade-book/trade-book/<CODE>/price -> {items:[{price, bidLot, ...}]}
-        item pertama = level harga tertinggi = best bid.
+        Return {'bid': best_bid, 'ask': best_ask} atau {} kalau gagal.
+        bids diurut tertinggi -> best bid = bids[0]; offers terendah -> ask = offers[0].
         """
         try:
-            r = pc._req("GET", f"/trade-book/trade-book/{code}/price",
+            r = pc._req("GET", f"/catalog/company/{code}/order-book",
                         token=self.ensure_token())
-            items = (r.get("data") or {}).get("items") or []
-            if items:
-                return items[0]["price"]
+            d = r.get("data") or {}
+            bids, offers = d.get("bids") or [], d.get("offers") or []
+            out = {}
+            if bids:
+                out["bid"] = bids[0]["price"]
+            if offers:
+                out["ask"] = offers[0]["price"]
+            return out
         except Exception:
-            pass
-        return None
+            return {}
+
+    def best_bid(self, code):
+        """Best bid — jual DI BID (persis protraderbot FLIP 'jual di bid')."""
+        return self.order_book(code).get("bid")
+
+    def best_ask(self, code):
+        """Best ask — beli DI ASK (persis protraderbot: order di offer side)."""
+        return self.order_book(code).get("ask")
 
     def execute_exits(self, exits, live=False):
         """Eksekusi exit plan (TAKE PROFIT) -> SELL DI BID (DRY-RUN default).
@@ -661,6 +673,11 @@ class ProfitsBot:
                     self.log(f"[SKIP] {code} harga n/a ({px.get('source')})")
                     continue
                 price = int(round(price))
+                # beli DI ASK (persis protraderbot: order di offer side) — fallback last
+                ask = self.best_ask(code)
+                if ask:
+                    self.log(f"  beli DI ASK {code}: ask {ask} (last {price})")
+                    price = int(ask)
                 # SL utk sizing (risk-based) + rencana SL setelah posisi terisi
                 sl = self.sl_donchian_plan(code, SCAN_INTERVAL)
                 sl_price = sl.get("trigger") if sl and "trigger" in sl else None
@@ -864,7 +881,53 @@ def run_loop(bot, cycle_minutes=CYCLE_MINUTES, interval=SCAN_INTERVAL,
         _t.sleep(max(cycle_minutes * 60, 10))
 
 
+def _single_instance_lock():
+    """Cegah 2 bot jalan bersamaan (RACE CONDITION -> double order -> cash minus!).
+
+    Lock file berisi PID; kalau proses dengan PID itu MASIH HIDUP -> tolak start.
+    """
+    import os as _os
+    lock = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "bot.lock")
+    try:
+        if _os.path.exists(lock):
+            old_pid = int(open(lock).read().strip() or 0)
+            if old_pid and _os.name == "nt":
+                # Windows: cek via tasklist (perintah eksternal cepat)
+                out = _os.popen(f"tasklist /FI \"PID eq {old_pid}\"").read()
+                if str(old_pid) in out and "python" in out.lower():
+                    return False, f"bot lain masih jalan (PID {old_pid})"
+            elif old_pid:
+                try:
+                    _os.kill(old_pid, 0)  # sinyal 0 = cek hidup
+                    return False, f"bot lain masih jalan (PID {old_pid})"
+                except OSError:
+                    pass
+        open(lock, "w").write(str(_os.getpid()))
+        return True, lock
+    except Exception:
+        return True, lock
+
+
 def main():
+    import sys as _sys
+    args = _sys.argv[1:]
+    ok, lock = _single_instance_lock()
+    if not ok:
+        print(f"[BOT] TOLAK start: {lock} — stop dulu atau kill proses itu, lalu coba lagi!")
+        print("[BOT] (2 bot jalan bersamaan = double order — insiden cash minus 2026-08-12)")
+        return
+    try:
+        _main(args)
+    finally:
+        import os as _os
+        try:
+            if lock and _os.path.exists(lock):
+                _os.remove(lock)
+        except Exception:
+            pass
+
+
+def _main(args):
     # mode: nontrade (DRY-RUN, default) | trade (kirim order beneran)
     mode = BOT_MODE
     args = sys.argv[1:]
