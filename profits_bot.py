@@ -60,6 +60,7 @@ SL_DONCHIAN_PERIOD = int(os.environ.get("PROFITS_SL_DONCHIAN_PERIOD", str(DONCHI
 FLIP = USE_FLIP
 BUY_UPTREND_ONLY = os.environ.get("PROFITS_BUY_UPTREND_ONLY", "1") == "1"  # buy HANYA uptrend kuat
 UPTREND_MIN_PCT = float(os.environ.get("PROFITS_UPTREND_MIN_PCT", "35"))  # ambang adx_sma_pct
+TP_PCT = float(os.environ.get("PROFITS_TP_PCT", "0.5"))  # exit check: floating profit > %
 LOT_SIZE = 100  # 1 lot = 100 lembar
 MAINT_WINDOW = (22 * 60, 5)  # 22:00-00:05 WIB (server maintenance)
 
@@ -184,6 +185,36 @@ class ProfitsBot:
                          "current": cur, "flat": round(flat)})
         rows.sort(key=lambda z: z["flat"])
         return {"rows": rows, "total_flat": round(tot)}
+    def check_exit(self, tp_pct=0.5):
+        """Exit check — TAKE PROFIT dari holding (ala protraderbot exit_check).
+
+        Untuk tiap posisi: floating profit > tp_pct (%) -> SELL (jual available).
+        Return list {code, qty_lot, price, avg, flat_pct} — urut profit terbesar.
+        """
+        f = self.flat_positions()
+        exits = []
+        for r in f["rows"]:
+            avg, cur, qty = r.get("avg") or 0, r.get("current") or 0, r.get("qty") or 0
+            if qty <= 0 or avg <= 0 or cur <= 0:
+                continue
+            flat_pct = (cur - avg) / avg * 100
+            if flat_pct > tp_pct:
+                exits.append({"code": r["code"], "qty_lot": max(int(qty // 100), 1),
+                              "price": cur, "avg": avg, "flat_pct": round(flat_pct, 2)})
+        exits.sort(key=lambda z: -z["flat_pct"])
+        return exits
+
+    def execute_exits(self, exits, live=False):
+        """Eksekusi exit plan (TAKE PROFIT) -> SELL order (DRY-RUN default)."""
+        self.live = live
+        done = []
+        for e in exits:
+            plan = self.place_order(e["code"], e["qty_lot"], is_buy=False,
+                                    price=int(round(e["price"])), order_type="limit")
+            if plan:
+                done.append(plan)
+        return done
+
     def get_price(self, code):
         """Harga terakhir via REST (jalan 24/7)."""
         r = pc._req("GET", f"/catalog/company/{code}/price", token=self.ensure_token())
@@ -507,7 +538,8 @@ class ProfitsBot:
             tv = self.top_values(TOP_VALUES)
             codes = [b["code"] for b in tv] or SYMBOLS
             values = {b["code"]: b.get("val", 0) for b in tv}
-            if not tv:
+            if not tv and not getattr(self, "_fb_warned", False):
+                self._fb_warned = True
                 self.log(f"top-stocks kosong (data harian di-clear) — fallback ke SYMBOLS: {codes}")
         results = []
         for c in codes:
@@ -720,6 +752,19 @@ def run_loop(bot, cycle_minutes=CYCLE_MINUTES, interval=SCAN_INTERVAL,
                             bot.log(f"ORDER PLAN ({len(plans)}): " + ", ".join(
                                 f"{p['symbol']} {'BUY' if p['isBuy'] else 'SELL'} {p['qty_lot']}lot @{p['price']}"
                                 for p in plans))
+            # EXIT CHECK — TAKE PROFIT dari holding (ala protraderbot)
+            try:
+                exits = bot.check_exit(tp_pct=TP_PCT)
+                if exits:
+                    for e in exits:
+                        bot.log(f"EXIT TP {e['code']}: +{e['flat_pct']}% (avg {e['avg']:.0f} -> {e['price']:.0f})")
+                    if auto_execute:
+                        plans = bot.execute_exits(exits, live=bot.live)
+                        if plans:
+                            bot.log(f"EXIT ORDER PLAN ({len(plans)}): " + ", ".join(
+                                f"SELL {p['symbol']} {p['qty_lot']}lot @{p['price']}" for p in plans))
+            except Exception as e:
+                bot.log(f"exit check error: {e}")
             if not new_sig:
                 bot.log(f"scan ok ({len(res)} saham, tidak ada sinyal baru)")
         except Exception as e:

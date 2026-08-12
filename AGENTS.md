@@ -185,7 +185,9 @@ Payload createOrder (TERVERIFIKASI LIVE 2026-08-12):
 
 ## LOOP / RUN (main)
 - `python profits_bot.py --loop [--cycle 3] [--interval 15m] [--execute] [--live]`
-- Config env: PROFITS_CYCLE_MINUTES (3), PROFITS_SCAN_INTERVAL (15m),
+- EXIT CHECK (check_exit): posisi dgn floating profit > PROFITS_TP_PCT (0.5%)
+  -> SELL (jual available) — di-loop tiap cycle; execute kalau auto_execute/live.
+- - Config env: PROFITS_CYCLE_MINUTES (3), PROFITS_SCAN_INTERVAL (15m),
   PROFITS_AUTO_EXECUTE (0/1), PROFITS_MARKET_HOURS (0 = 24 jam testing; 1 = jam bursa),
   PROFITS_MARKET_OPEN/CLOSE (09:00/15:30 WIB, weekday).
 - Loop: scan top values 15 tiap cycle saat market buka; lapor SINYAL BARU (dedup
