@@ -447,6 +447,8 @@ class ProfitsBot:
         rsi = ind.rsi(close, 14)
         sma20 = ind.sma(close, 20)
         close_last = close[-1]
+        # statistic bullish ala stocktrade: % bar ADX>25 & Close>SMA20 (window 100)
+        adx_pct, adx_comment = ind.adx_sma_pct(s, close, ind.sma_series(close, 20))
 
         # filter DISCRETE: % bar flat (close == prev close) > MAX_FLAT_PCT -> skip
         flat_pct = 0.0
@@ -457,7 +459,8 @@ class ProfitsBot:
         action, score, reasons = "HOLD", 0, []
         ind_snap = {"last": close_last, "pdi": last["pdi"], "mdi": last["mdi"],
                     "adx": last["adx"], "rsi": rsi, "sma20": sma20,
-                    "flat_pct": round(flat_pct, 1)}
+                    "flat_pct": round(flat_pct, 1),
+                    "adx_sma_pct": adx_pct, "trend_comment": adx_comment}
         if FILTER_DISCRETE and flat_pct > MAX_FLAT_PCT:
             return {"code": code, "action": "HOLD", "score": 0,
                     "reasons": [f"DISCRETE: {flat_pct:.0f}% bar flat (max {MAX_FLAT_PCT:.0f}%)"],
@@ -497,19 +500,30 @@ class ProfitsBot:
         -> fallback ke PROFITS_SYMBOLS supaya loop tetap ada isinya saat testing.
         """
         import urllib.request, urllib.error
+        values = {}
         if codes is None:
             tv = self.top_values(TOP_VALUES)
             codes = [b["code"] for b in tv] or SYMBOLS
+            values = {b["code"]: b.get("val", 0) for b in tv}
             if not tv:
                 self.log(f"top-stocks kosong (data harian di-clear) — fallback ke SYMBOLS: {codes}")
         results = []
         for c in codes:
             try:
-                results.append(self.signal(c, interval))
+                r = self.signal(c, interval)
+                r["value"] = values.get(c, 0)  # likuiditas (nilai transaksi, jt)
+                results.append(r)
             except Exception as e:
                 results.append({"code": c, "action": "HOLD", "score": 0,
-                                "reasons": [f"err: {e}"]})
-        results.sort(key=lambda r: (r["action"] != "HOLD", -r["score"]))
+                                "reasons": [f"err: {e}"], "value": values.get(c, 0)})
+        # ranking PERSIS stocktrade screener (line 2513 app.py):
+        #   sort by (rekomendasi, adx_sma_pct = statistic bullish, value) desc
+        action_rank = {"BUY": 3, "SELL": 2, "HOLD": 0}
+        results.sort(key=lambda r: (
+            action_rank.get(r["action"], 0),
+            (r.get("ind") or {}).get("adx_sma_pct", 0) or 0,
+            r.get("value", 0) or 0
+        ), reverse=True)
         return results
 
     def sl_donchian_plan(self, code, interval="15m"):

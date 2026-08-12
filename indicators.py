@@ -87,6 +87,44 @@ def bollinger(vals, n=20, k=2.0):
     return {"middle": mid, "upper": mid + k * sd, "lower": mid - k * sd}
 
 
+def sma_series(vals, n):
+    """SMA series — list per bar (None utk bar awal < n)."""
+    out = [None] * len(vals)
+    if len(vals) < n:
+        return out
+    s = sum(vals[:n])
+    out[n - 1] = s / n
+    for i in range(n, len(vals)):
+        s += vals[i] - vals[i - n]
+        out[i] = s / n
+    return out
+
+
+def adx_sma_pct(adx_series_list, close, sma20_list, window=100, adx_min=25):
+    """Statistic bullish ala stocktrade: % bar dengan ADX>adx_min & Close>SMA20.
+
+    Window bar terakhir (default 100, mulai bar 20). Return (pct, commentary).
+    Commentary: >=35 'Uptrend Kuat', >=30 'Medium Uptrend', else 'Sideways'.
+    """
+    valid = bull = 0
+    n = len(close)
+    start = max(20, n - window)
+    for i in range(start, n):
+        d = adx_series_list[i]
+        sma20 = sma20_list[i]
+        if not d or sma20 is None:
+            continue
+        valid += 1
+        if d["adx"] > adx_min and close[i] > sma20:
+            bull += 1
+    pct = round(100.0 * bull / valid, 1) if valid else 0.0
+    if pct >= 35:
+        return pct, f"Uptrend Kuat ({pct:.0f}%)"
+    if pct >= 30:
+        return pct, f"Medium Uptrend ({pct:.0f}%)"
+    return pct, f"Sideways ({pct:.0f}%)"
+
+
 def donchian(vals, n=20):
     """Donchian Channel (approksimasi close-only): high/low dari close terakhir n."""
     if len(vals) < n:
