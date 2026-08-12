@@ -489,9 +489,15 @@ class ProfitsBot:
             flat = sum(1 for i in range(1, len(close)) if close[i] == close[i - 1])
             flat_pct = 100.0 * flat / (len(close) - 1)
 
+        # SL Donchian (2.8x period) — dipakai utk ind_snap & log
+        lookback = max(int(2.8 * DONCHIAN_PERIOD), 5)
+        dc = ind.donchian(close, lookback)
+        sl_lower = dc["lower"] if dc else None
+
         action, score, reasons = "HOLD", 0, []
         ind_snap = {"last": close_last, "pdi": last["pdi"], "mdi": last["mdi"],
                     "adx": last["adx"], "rsi": rsi, "sma20": sma20,
+                    "sl": sl_lower,
                     "flat_pct": round(flat_pct, 1),
                     "adx_sma_pct": adx_pct, "trend_comment": adx_comment}
         if FILTER_DISCRETE and flat_pct > MAX_FLAT_PCT:
@@ -504,9 +510,6 @@ class ProfitsBot:
         #        (sinyal bearish = SHORT — DI SINI = pemicu EXIT LONG, IDX cash ga bisa short)
         i = len(close) - 1
         s6 = s[-6] if len(s) >= 6 else None
-        lookback = max(int(2.8 * DONCHIAN_PERIOD), 5)  # SL Donchian (2.8x period)
-        dc = ind.donchian(close, lookback)
-        sl_lower = dc["lower"] if dc else None
         if i >= 6 and s6 and sl_lower is not None and sma20 is not None:
             if (low[i] > sl_lower and close[i] > sma20
                     and last["adx"] > adx_thresh and last["adx"] > s6["adx"]
@@ -737,6 +740,16 @@ def run_loop(bot, cycle_minutes=CYCLE_MINUTES, interval=SCAN_INTERVAL,
                 _t.sleep(60)
                 continue
             res = bot.scan_signals(interval=interval)
+            # log per-saham ala protraderbot (i/N + action + trend + indikator)
+            for i, r in enumerate(res, 1):
+                ind = r.get("ind") or {}
+                comm = ind.get("trend_comment") or ""
+                bot.log(
+                    f"[{i}/{len(res)}] {r['code']:<6} {r['action']:5s} [{comm}] "
+                    f"ADX={ind.get('adx', 0):.1f} +DI={ind.get('pdi', 0):.1f} "
+                    f"-DI={ind.get('mdi', 0):.1f} last={ind.get('last', 0):.0f} "
+                    f"SMA20={ind.get('sma20', 0):.0f} SL={ind.get('sl', 0):.0f} "
+                    f"pct={ind.get('adx_sma_pct', 0):.0f}% val={r.get('value', 0)/1e9:.2f}B")
             new_sig = []
             for r in res:
                 if r["action"] == "HOLD":
