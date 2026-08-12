@@ -429,6 +429,7 @@ class ProfitsBot:
         """
         adx_n = adx_n or ADX_PERIOD
         adx_thresh = ADX_THRESHOLD
+        adx_cross = ADX_CROSS
         ohlc = self.fetch_ohlc(code, interval, range_)
         if isinstance(ohlc, dict):
             return {"code": code, "action": "HOLD", "score": 0,
@@ -504,11 +505,17 @@ class ProfitsBot:
                 "reasons": reasons, "ind": ind_snap, "interval": interval}
 
     def scan_signals(self, codes=None, interval="15m"):
-        """Scan daftar saham (default: top values TOP_VALUES) -> list sinyal sorted by score."""
+        """Scan daftar saham (default: top values TOP_VALUES — fallback SYMBOLS kalau kosong).
+
+        top-stocks = data harian (di-clear 08:00 WIB) — kosong di luar jam pasar
+        -> fallback ke PROFITS_SYMBOLS supaya loop tetap ada isinya saat testing.
+        """
         import urllib.request, urllib.error
         if codes is None:
             tv = self.top_values(TOP_VALUES)
-            codes = [b["code"] for b in tv]
+            codes = [b["code"] for b in tv] or SYMBOLS
+            if not tv:
+                self.log(f"top-stocks kosong (data harian di-clear) — fallback ke SYMBOLS: {codes}")
         results = []
         for c in codes:
             try:
