@@ -198,9 +198,13 @@ class ProfitsBot:
         (profit dikunci dari atas). BUKAN jual langsung di +0,5%!
         """
         f = self.flat_positions()
+        rows = f["rows"]
+        live = self._live_prices([r["code"] for r in rows],
+                                 {r["code"]: r["current"] for r in rows})
         exits = []
-        for r in f["rows"]:
-            avg, cur, qty = r.get("avg") or 0, r.get("current") or 0, r.get("qty") or 0
+        for r in rows:
+            avg, cur, qty = (r.get("avg") or 0, live.get(r["code"]) or 0,
+                             r.get("qty") or 0)
             if qty <= 0 or avg <= 0 or cur <= 0:
                 continue
             flat_pct = (cur - avg) / avg * 100
@@ -502,6 +506,40 @@ class ProfitsBot:
             return {"source": "yahoo", "bid": None, "ask": None,
                     "last": last["c"], "vol": last["v"], "ts": last["t"]}
         return {"source": "none", "error": "semua sumber gagal"}
+
+    def _live_prices(self, codes, fallback_map=None):
+        """Harga live PMP utk BANYAK kode PARALEL (via api_server 8777).
+
+        /price butuh ~2-6s per kode kalau cache api_server (TTL 5s) dingin
+        (pmp_ask.exe) — parallel biar 14 posisi selesai ~20s, bukan 84s.
+        Tanpa fallback Yahoo (lambat) — display & keputusan TP. Gagal ->
+        pakai nilai fallback_map (harga portfolio)."""
+        import urllib.request
+        from concurrent.futures import ThreadPoolExecutor
+        out = dict(fallback_map or {})
+
+        def _one(code):
+            try:
+                with urllib.request.urlopen(urllib.request.Request(
+                        f"{PROTRADER_API}/price/{code}",
+                        headers={"User-Agent": "profitsbot/1.0"}), timeout=8) as resp:
+                    d = json.loads(resp.read().decode())
+                pv = d.get("last") or d.get("bid") or d.get("ask")
+                if pv:
+                    return code, float(pv)
+            except Exception:
+                pass
+            return code, None
+
+        with ThreadPoolExecutor(max_workers=min(len(codes), 4)) as ex:
+            for code, pv in ex.map(_one, codes):
+                if pv is not None:
+                    out[code] = pv
+        return out
+
+    def _live_price(self, code, fallback=0.0):
+        """Harga live 1 kode (wrapper _live_prices)."""
+        return self._live_prices([code], {code: fallback}).get(code, fallback)
 
     def indicator_snapshot(self, code):
         """Ambil intraday history -> hitung semua indikator (MA/RSI/MACD/Boll/DC)."""
@@ -850,6 +888,9 @@ def run_loop(bot, cycle_minutes=CYCLE_MINUTES, interval=SCAN_INTERVAL,
                 f = bot.flat_positions()
                 rows = f["rows"]
                 if rows:
+                    live = bot._live_prices(
+                        [r["code"] for r in rows],
+                        {r["code"]: r["current"] for r in rows})
                     bot.log(f"HOLDING ({len(rows)}) — flat {f['total_flat']:+,.0f}:")
                     for i, r in enumerate(rows, 1):
                         try:
@@ -859,12 +900,15 @@ def run_loop(bot, cycle_minutes=CYCLE_MINUTES, interval=SCAN_INTERVAL,
                                 pos_res.append(sig)
                         except Exception:
                             act = "?"
+                        # harga LIVE PMP (flat_positions API Profits bisa telat)
+                        cur = live.get(r["code"], r["current"])
                         # badge sinyal: SHORT (exit long) &/atau TP (floating profit)
-                        flat_pct = ((r["current"] - r["avg"]) / r["avg"] * 100) if r["avg"] else 0
+                        flat_pct = ((cur - r["avg"]) / r["avg"] * 100) if r["avg"] else 0
+                        flat_val = round((cur - r["avg"]) * r["qty"])
                         badges = [b for b in [act, "TP" if flat_pct > TP_PCT else None] if b]
                         badge = "+".join(badges) if badges else "-"
                         bot.log(f"  [{i}/{len(rows)}] {r['code']:<6} {max(r['qty'] // 100, 1):>4}lot "
-                                f"avg{r['avg']:.0f} cur{r['current']:.0f} {r['flat']:+,.0f} [{badge}]")
+                                f"avg{r['avg']:.0f} cur{cur:.0f} {flat_val:+,.0f} [{badge}]")
                 else:
                     bot.log("HOLDING: 0 posisi")
             except Exception as e:
