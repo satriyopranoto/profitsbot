@@ -204,13 +204,35 @@ class ProfitsBot:
         exits.sort(key=lambda z: -z["flat_pct"])
         return exits
 
+    def best_bid(self, code):
+        """Best bid (harga beli tertinggi) via order-book — utk jual DI BID.
+
+        /trade-book/trade-book/<CODE>/price -> {items:[{price, bidLot, ...}]}
+        item pertama = level harga tertinggi = best bid.
+        """
+        try:
+            r = pc._req("GET", f"/trade-book/trade-book/{code}/price",
+                        token=self.ensure_token())
+            items = (r.get("data") or {}).get("items") or []
+            if items:
+                return items[0]["price"]
+        except Exception:
+            pass
+        return None
+
     def execute_exits(self, exits, live=False):
-        """Eksekusi exit plan (TAKE PROFIT) -> SELL order (DRY-RUN default)."""
+        """Eksekusi exit plan (TAKE PROFIT) -> SELL DI BID (DRY-RUN default).
+
+        Jual di best bid biar LANGSUNG kena (persis protraderbot FLIP:
+        'jual di bid') — bukan limit di last yang bisa ngantri & ngunci posisi.
+        """
         self.live = live
         done = []
         for e in exits:
+            bid = self.best_bid(e["code"]) or e.get("price")
+            self.log(f"  jual DI BID {e['code']}: bid {bid} (last {e.get('price')})")
             plan = self.place_order(e["code"], e["qty_lot"], is_buy=False,
-                                    price=int(round(e["price"])), order_type="limit")
+                                    price=int(bid), order_type="limit")
             if plan:
                 done.append(plan)
         return done
