@@ -132,6 +132,43 @@ lot_final = min(lot, cap 20jt / harga/100, sisa cash)   # 3 lapis guard
 - **DRY-RUN default** — order hanya log, tidak dikirim (kecuali `--trade`)
 - **qty = LOT** (1 lot = 100 lembar) — terverifikasi live
 
+## 🔌 Harga real-time dari Bot Protrader (opsional, tapi disarankan)
+
+Bot Profits pakai **fallback chain** utk harga real-time:
+
+```
+1. Bot Protrader API (localhost:8777)  <- real-time PMP (bid/ask/last) — TERCEPAT
+2. Yahoo Finance .JK                   <- delay ±10 menit (fallback otomatis kalau service mati)
+```
+
+**Cara nyalakan API service di repo protraderbot:**
+
+```bash
+cd protraderbot
+
+# Mode 1 — SERVICE standalone (bot protrader nggak perlu nyala):
+./.venv/Scripts/python.exe -m bot.api_server --port 8777
+# atau double-click: start_api_server.bat
+
+# Mode 2 — otomatis ikut nyala pas autobot protrader jalan (thread)
+```
+
+**Verifikasi:**
+```bash
+curl http://127.0.0.1:8777/health          # {"ok": true}
+curl http://127.0.0.1:8777/price/BBCA      # {"code":"BBCA","bid":6300,"ask":6300,"last":6300,...}
+```
+
+| Endpoint | Fungsi |
+|---|---|
+| `GET /health` | cek service hidup |
+| `GET /price/<CODE>` | harga real-time (bid = F005, ask = F006, last = F009) |
+
+- Port bisa diubah via `.env` protraderbot (`API_SERVER_PORT`)
+- **TIDAK auto-start** — nyalakan manual (kamu yang pegang kendali)
+- Aman jalan bareng autobot / desktop GUI protrader (PMP data — bukan session SOAP, tidak saling kick)
+- Kalau service mati → bot Profits otomatis fallback ke Yahoo (log `source=yahoo`)
+
 ## 🧩 Struktur
 
 ```
