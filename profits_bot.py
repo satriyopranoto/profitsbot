@@ -418,14 +418,13 @@ class ProfitsBot:
         return s
 
     def signal(self, code, interval="15m", range_="5d", adx_n=None):
-        """Analisis sinyal utk 1 saham (OHLC Yahoo).
+        """Analisis sinyal utk 1 saham (OHLC Yahoo) — PERSIS protraderbot.
 
-        BUY : +DI cross ABOVE -DI (golden cross) & ADX>=ADX_CROSS
-              — ATAU  +DI>-DI & ADX>=ADX_THRESHOLD
-        SELL: -DI cross ABOVE +DI (death cross) & ADX>=ADX_CROSS
-              — ATAU  -DI>+DI & ADX>=ADX_THRESHOLD
-        Filter: RSI wajar + harga vs SMA20 + DISCRETE (flat %) + Bollinger konteks.
-        Return {code, action, score, reasons[], ind{...}}.
+        BUY : low>SL(Donchian) & close>SMA20 & ADX>ADX_THRESHOLD & ADX naik(5)
+              & +DI>-DI & +DI naik(5)   [strict >, bukan cross, bukan >=]
+        SELL: high<SL & close<SMA20 & ADX>ADX_THRESHOLD & ADX naik(5)
+              & -DI>+DI & -DI naik(5)
+        Filter tambahan: DISCRETE (flat %). Return {code, action, score, reasons[], ind{...}}.
         """
         adx_n = adx_n or ADX_PERIOD
         adx_thresh = ADX_THRESHOLD
@@ -442,15 +441,12 @@ class ProfitsBot:
         close = [x["c"] for x in ohlc]
         s = ind.adx_series(high, low, close, adx_n)
         last = s[-1]
-        prev = s[-2]
-        if not last or not prev:
+        if not last:
             return {"code": code, "action": "HOLD", "score": 0,
                     "reasons": ["indikator belum siap"]}
         rsi = ind.rsi(close, 14)
         sma20 = ind.sma(close, 20)
         close_last = close[-1]
-        cross_up = prev["pdi"] <= prev["mdi"] and last["pdi"] > last["mdi"]
-        cross_dn = prev["mdi"] <= prev["pdi"] and last["mdi"] > last["pdi"]
 
         # filter DISCRETE: % bar flat (close == prev close) > MAX_FLAT_PCT -> skip
         flat_pct = 0.0
@@ -466,39 +462,29 @@ class ProfitsBot:
             return {"code": code, "action": "HOLD", "score": 0,
                     "reasons": [f"DISCRETE: {flat_pct:.0f}% bar flat (max {MAX_FLAT_PCT:.0f}%)"],
                     "ind": ind_snap, "interval": interval}
-        # ---- BUY ----
-        if cross_up and last["adx"] >= adx_cross:
-            action, score = "BUY", 2
-            reasons.append(f"+DI cross ABOVE -DI (golden cross), ADX {last['adx']}")
-        elif last["pdi"] > last["mdi"] and last["adx"] >= adx_thresh:
-            action, score = "BUY", 1
-            reasons.append(f"trend bullish (+DI {last['pdi']} > -DI {last['mdi']}, ADX {last['adx']})")
-        if action == "BUY":
-            if rsi and rsi > 75:
-                score -= 1
-                reasons.append(f"RSI {rsi:.0f} overbought (risiko)")
-            if sma20 and close_last < sma20:
-                score -= 1
-                reasons.append(f"harga {close_last} < SMA20 {sma20:.0f}")
-            if score <= 0:
-                action = "HOLD"
-        # ---- SELL ----
-        if action == "HOLD":
-            if cross_dn and last["adx"] >= adx_cross:
-                action, score = "SELL", 2
-                reasons.append(f"-DI cross ABOVE +DI (death cross), ADX {last['adx']}")
-            elif last["mdi"] > last["pdi"] and last["adx"] >= adx_thresh:
+        # ---- sinyal PERSIS protraderbot (signal_buy / signal_sell) ----
+        # BUY : low>SL & close>SMA20 & ADX>thresh & ADX naik(5) & +DI>-DI & +DI naik(5)
+        # SELL: high<SL & close<SMA20 & ADX>thresh & ADX naik(5) & -DI>+DI & -DI naik(5)
+        i = len(close) - 1
+        s6 = s[-6] if len(s) >= 6 else None
+        lookback = max(int(2.8 * DONCHIAN_PERIOD), 5)  # SL Donchian (2.8x period)
+        dc = ind.donchian(close, lookback)
+        sl_lower = dc["lower"] if dc else None
+        if i >= 6 and s6 and sl_lower is not None and sma20 is not None:
+            if (low[i] > sl_lower and close[i] > sma20
+                    and last["adx"] > adx_thresh and last["adx"] > s6["adx"]
+                    and last["pdi"] > last["mdi"] and last["pdi"] > s6["pdi"]):
+                action, score = "BUY", 1
+                reasons.append(
+                    f"BUY: low {low[i]:.0f}>SL {sl_lower:.0f}, close {close[i]:.0f}>SMA20 {sma20:.0f}, "
+                    f"ADX {last['adx']:.1f}>{adx_thresh:.0f} & naik, +DI {last['pdi']:.1f}>-DI {last['mdi']:.1f} & naik")
+            elif (high[i] < sl_lower and close[i] < sma20
+                    and last["adx"] > adx_thresh and last["adx"] > s6["adx"]
+                    and last["mdi"] > last["pdi"] and last["mdi"] > s6["mdi"]):
                 action, score = "SELL", 1
-                reasons.append(f"trend bearish (-DI {last['mdi']} > +DI {last['pdi']}, ADX {last['adx']})")
-            if action == "SELL":
-                if rsi and rsi < 25:
-                    score -= 1
-                    reasons.append(f"RSI {rsi:.0f} oversold (risiko)")
-                if sma20 and close_last > sma20:
-                    score -= 1
-                    reasons.append(f"harga {close_last} > SMA20 {sma20:.0f}")
-                if score <= 0:
-                    action = "HOLD"
+                reasons.append(
+                    f"SELL: high {high[i]:.0f}<SL {sl_lower:.0f}, close {close[i]:.0f}<SMA20 {sma20:.0f}, "
+                    f"ADX {last['adx']:.1f}>{adx_thresh:.0f} & naik, -DI {last['mdi']:.1f}>+DI {last['pdi']:.1f} & naik")
         if action == "HOLD" and not reasons:
             reasons.append(f"ADX {last['adx']} +DI {last['pdi']} -DI {last['mdi']} RSI {rsi:.0f}")
         return {"code": code, "action": action, "score": score,
