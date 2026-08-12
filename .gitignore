@@ -6,3 +6,4 @@ package-lock.json
 package.json
 .hermes-tmp.*
 .venv/
+bot.lock
