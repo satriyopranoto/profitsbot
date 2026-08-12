@@ -32,6 +32,10 @@ SCAN_INTERVAL = os.environ.get("PROFITS_SCAN_INTERVAL", "15m")  # timeframe siny
 AUTO_EXECUTE = os.environ.get("PROFITS_AUTO_EXECUTE", "0") == "1"  # eksekusi otomatis (DRY-RUN)
 MARKET_OPEN = os.environ.get("PROFITS_MARKET_OPEN", "09:00")  # jam pasar WIB
 MARKET_CLOSE = os.environ.get("PROFITS_MARKET_CLOSE", "15:30")
+ADX_CROSS = float(os.environ.get("PROFITS_ADX_CROSS", "15"))  # ADX min utk deteksi cross
+ADX_TREND = float(os.environ.get("PROFITS_ADX_TREND", "25"))  # ADX min utk sinyal trend
+SL_DONCHIAN_PERIOD = int(os.environ.get("PROFITS_SL_DONCHIAN_PERIOD", "20"))  # lookback Donchian utk SL
+FLIP = os.environ.get("PROFITS_FLIP", "0") == "1"  # 1 = SELL sinyal tutup posisi (flip)
 LOT_SIZE = 100  # 1 lot = 100 lembar
 MAINT_WINDOW = (22 * 60, 5)  # 22:00-00:05 WIB (server maintenance)
 
@@ -394,11 +398,14 @@ class ProfitsBot:
     def signal(self, code, interval="15m", range_="5d", adx_n=14):
         """Analisis sinyal utk 1 saham (OHLC Yahoo).
 
-        BUY : +DI cross ABOVE -DI (golden cross) & ADX>=15  — ATAU  +DI>-DI & ADX>=25
-        SELL: -DI cross ABOVE +DI (death cross) & ADX>=15  — ATAU  -DI>+DI & ADX>=25
+        BUY : +DI cross ABOVE -DI (golden cross) & ADX>=ADX_CROSS
+              — ATAU  +DI>-DI & ADX>=ADX_TREND
+        SELL: -DI cross ABOVE +DI (death cross) & ADX>=ADX_CROSS
+              — ATAU  -DI>+DI & ADX>=ADX_TREND
         Filter: RSI wajar + harga vs SMA20 (buy: close>SMA20 utk konfirmasi tren).
         Return {code, action, score, reasons[], ind{...}}.
         """
+        adx_cross, adx_trend = ADX_CROSS, ADX_TREND
         ohlc = self.fetch_ohlc(code, interval, range_)
         if isinstance(ohlc, dict):
             return {"code": code, "action": "HOLD", "score": 0,
@@ -425,10 +432,10 @@ class ProfitsBot:
         ind_snap = {"last": close_last, "pdi": last["pdi"], "mdi": last["mdi"],
                     "adx": last["adx"], "rsi": rsi, "sma20": sma20}
         # ---- BUY ----
-        if cross_up and last["adx"] >= 15:
+        if cross_up and last["adx"] >= adx_cross:
             action, score = "BUY", 2
             reasons.append(f"+DI cross ABOVE -DI (golden cross), ADX {last['adx']}")
-        elif last["pdi"] > last["mdi"] and last["adx"] >= 25:
+        elif last["pdi"] > last["mdi"] and last["adx"] >= adx_trend:
             action, score = "BUY", 1
             reasons.append(f"trend bullish (+DI {last['pdi']} > -DI {last['mdi']}, ADX {last['adx']})")
         if action == "BUY":
@@ -442,10 +449,10 @@ class ProfitsBot:
                 action = "HOLD"
         # ---- SELL ----
         if action == "HOLD":
-            if cross_dn and last["adx"] >= 15:
+            if cross_dn and last["adx"] >= adx_cross:
                 action, score = "SELL", 2
                 reasons.append(f"-DI cross ABOVE +DI (death cross), ADX {last['adx']}")
-            elif last["mdi"] > last["pdi"] and last["adx"] >= 25:
+            elif last["mdi"] > last["pdi"] and last["adx"] >= adx_trend:
                 action, score = "SELL", 1
                 reasons.append(f"trend bearish (-DI {last['mdi']} > +DI {last['pdi']}, ADX {last['adx']})")
             if action == "SELL":
@@ -477,6 +484,23 @@ class ProfitsBot:
                                 "reasons": [f"err: {e}"]})
         results.sort(key=lambda r: (r["action"] != "HOLD", -r["score"]))
         return results
+
+    def sl_donchian_plan(self, code, interval="15m"):
+        """SL berbasis Donchian lower channel (lookback SL_DONCHIAN_PERIOD).
+
+        Dari OHLC Yahoo: lower = min(close, n bar) — trigger = lower - 1 tick.
+        Return {code, trigger, lower, upper} — trigger integer (harga IDX).
+        """
+        ohlc = self.fetch_ohlc(code, interval, "5d")
+        if isinstance(ohlc, dict) or len(ohlc) < SL_DONCHIAN_PERIOD:
+            return {"code": code, "error": "data kurang"}
+        closes = [x["c"] for x in ohlc]
+        dc = ind.donchian(closes, SL_DONCHIAN_PERIOD)
+        if not dc:
+            return {"code": code, "error": "donchian gagal"}
+        trigger = max(int(dc["lower"]) - 1, 1)
+        return {"code": code, "trigger": trigger,
+                "lower": round(dc["lower"]), "upper": round(dc["upper"])}
 
     def execute_signals(self, results, min_score=1, live=False):
         """Eksekusi sinyal -> order (DRY-RUN default; live hanya dgn flag).
@@ -524,6 +548,11 @@ class ProfitsBot:
                                         order_type="limit")
                 if plan:
                     executed.append(plan)
+                    # SL Donchian plan (butuh posisi — berlaku setelah order terisi)
+                    sl = self.sl_donchian_plan(code, SCAN_INTERVAL)
+                    if sl and "trigger" in sl:
+                        plan["sl_donchian"] = sl["trigger"]
+                        self.log(f"  SL plan {code}: trigger {sl['trigger']} (Donchian lower {sl['lower']}, period {SL_DONCHIAN_PERIOD})")
             elif r["action"] == "SELL" and r["score"] >= min_score:
                 if code not in positions:
                     self.log(f"[SKIP] {code} tidak punya posisi — tidak ada yg dijual")
@@ -533,7 +562,10 @@ class ProfitsBot:
                 if not price:
                     self.log(f"[SKIP] {code} harga n/a ({px.get('source')})")
                     continue
-                plan = self.place_order(code, 1, is_buy=False, price=price,
+                # FLIP=1 -> tutup posisi penuh; default -> jual 1 lot (test/trim)
+                avail = positions[code].get("qty") or 0
+                qty_lot = max(avail // 100, 1) if FLIP else 1
+                plan = self.place_order(code, qty_lot, is_buy=False, price=price,
                                         order_type="limit")
                 if plan:
                     executed.append(plan)
@@ -627,13 +659,19 @@ def run_loop(bot, cycle_minutes=CYCLE_MINUTES, interval=SCAN_INTERVAL,
 
 
 def main():
-    live = "--live" in sys.argv
+    # mode: nontrade (DRY-RUN, default) | trade (kirim order beneran)
+    mode = os.environ.get("PROFITS_BOT_MODE", "nontrade").lower()
+    args = sys.argv[1:]
+    if "--live" in args or "--trade" in args:
+        mode = "trade"
+    if "--nontrade" in args or "--dry-run" in args:
+        mode = "nontrade"
+    live = mode == "trade"
     symbols = None
-    loop = "--loop" in sys.argv
+    loop = "--loop" in args
     cycle = CYCLE_MINUTES
     interval = SCAN_INTERVAL
     auto_execute = AUTO_EXECUTE
-    args = sys.argv[1:]
     for i, a in enumerate(args):
         if a == "--symbols" and i + 1 < len(args):
             symbols = args[i + 1].split(",")
@@ -647,7 +685,9 @@ def main():
     bot.login()
     bot.trade_login()
     if live:
-        print("!! LIVE MODE — order akan dikirim beneran !!")
+        print("!! TRADE MODE — order akan dikirim beneran !!")
+    else:
+        print("[NONTRADE/DRY-RUN] scan & log saja, tidak ada order dikirim.")
     if loop:
         run_loop(bot, cycle_minutes=cycle, interval=interval, auto_execute=auto_execute)
         return

@@ -157,6 +157,14 @@ Payload createOrder (TERVERIFIKASI LIVE 2026-08-12):
 - `profits_bot.real_time_price(code)` -> {source: protrader|yahoo, bid, ask, last, vol, ts}.
 - Data indikator OHLC tetap dari Yahoo (delay OK utk MA/ADX 15m/harian).
 
+## PARAMETER (env — analog protraderbot BOT_MODE/dll)
+- PROFITS_BOT_MODE=nontrade|trade — nontrade = DRY-RUN scan/log (default); trade = order real.
+  CLI: --nontrade/--dry-run | --trade/--live (--live alias lama tetap ada).
+- PROFITS_ADX_CROSS (15) & PROFITS_ADX_TREND (25) — threshold ADX utk sinyal.
+- PROFITS_SL_DONCHIAN_PERIOD (20) — lookback Donchian utk SL (sl_donchian_plan:
+  trigger = lower - 1 tick; log setelah BUY; SETELAH posisi terisi baru bisa dipasang).
+- PROFITS_FLIP (0/1) — 1 = SELL sinyal tutup posisi PENUH (avail/100 lot); 0 = jual 1 lot.
+
 ## LOOP / RUN (main)
 - `python profits_bot.py --loop [--cycle 3] [--interval 15m] [--execute] [--live]`
 - Config env: PROFITS_CYCLE_MINUTES (3), PROFITS_SCAN_INTERVAL (15m),
