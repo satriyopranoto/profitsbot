@@ -160,10 +160,10 @@ Payload createOrder (TERVERIFIKASI LIVE 2026-08-12):
 ## PARAMETER (env — analog protraderbot BOT_MODE/dll)
 - PROFITS_BOT_MODE=nontrade|trade — nontrade = DRY-RUN scan/log (default); trade = order real.
   CLI: --nontrade/--dry-run | --trade/--live (--live alias lama tetap ada).
-- PROFITS_ADX_CROSS (15) & PROFITS_ADX_TREND (25) — threshold ADX utk sinyal.
+- PROFITS_ADX_CROSS (15) & PROFITS_ADX_TREND (20 — USER: 20) — threshold ADX utk sinyal.
 - PROFITS_SL_DONCHIAN_PERIOD (20) — lookback Donchian utk SL (sl_donchian_plan:
   trigger = lower - 1 tick; log setelah BUY; SETELAH posisi terisi baru bisa dipasang).
-- PROFITS_FLIP (0/1) — 1 = SELL sinyal tutup posisi PENUH (avail/100 lot); 0 = jual 1 lot.
+- PROFITS_FLIP (1 — USER: true) — SELL sinyal tutup posisi PENUH (avail/100 lot); 0 = jual 1 lot.
 
 ## LOOP / RUN (main)
 - `python profits_bot.py --loop [--cycle 3] [--interval 15m] [--execute] [--live]`

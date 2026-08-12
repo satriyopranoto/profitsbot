@@ -33,9 +33,9 @@ AUTO_EXECUTE = os.environ.get("PROFITS_AUTO_EXECUTE", "0") == "1"  # eksekusi ot
 MARKET_OPEN = os.environ.get("PROFITS_MARKET_OPEN", "09:00")  # jam pasar WIB
 MARKET_CLOSE = os.environ.get("PROFITS_MARKET_CLOSE", "15:30")
 ADX_CROSS = float(os.environ.get("PROFITS_ADX_CROSS", "15"))  # ADX min utk deteksi cross
-ADX_TREND = float(os.environ.get("PROFITS_ADX_TREND", "25"))  # ADX min utk sinyal trend
+ADX_TREND = float(os.environ.get("PROFITS_ADX_TREND", "20"))  # ADX min utk sinyal trend (user: 20)
 SL_DONCHIAN_PERIOD = int(os.environ.get("PROFITS_SL_DONCHIAN_PERIOD", "20"))  # lookback Donchian utk SL
-FLIP = os.environ.get("PROFITS_FLIP", "0") == "1"  # 1 = SELL sinyal tutup posisi (flip)
+FLIP = os.environ.get("PROFITS_FLIP", "1") == "1"  # 1 = SELL sinyal tutup posisi penuh (user: true)
 LOT_SIZE = 100  # 1 lot = 100 lembar
 MAINT_WINDOW = (22 * 60, 5)  # 22:00-00:05 WIB (server maintenance)
 
