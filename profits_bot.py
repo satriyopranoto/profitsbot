@@ -775,8 +775,34 @@ def run_loop(bot, cycle_minutes=CYCLE_MINUTES, interval=SCAN_INTERVAL,
                     last_state[key] = r["score"]
                     new_sig.append(r)
                     bot.log(f"SINYAL {r['action']} {r['code']} (skor {r['score']}): {r['reasons'][0]}")
-            if auto_execute and (new_sig or True):
-                act = [r for r in res if r["action"] != "HOLD"]
+            # HOLDING — log posisi BARIS TURUN + sinyal tiap posisi (SHORT = bakal jual)
+            pos_res = []
+            try:
+                f = bot.flat_positions()
+                rows = f["rows"]
+                if rows:
+                    bot.log(f"HOLDING ({len(rows)}) — flat {f['total_flat']:+,.0f}:")
+                    for i, r in enumerate(rows, 1):
+                        try:
+                            sig = bot.signal(r["code"], interval)
+                            act = sig["action"]
+                            if act != "HOLD":
+                                pos_res.append(sig)
+                        except Exception:
+                            act = "?"
+                        # badge sinyal: SHORT (exit long) &/atau TP (floating profit)
+                        flat_pct = ((r["current"] - r["avg"]) / r["avg"] * 100) if r["avg"] else 0
+                        badges = [b for b in [act, "TP" if flat_pct > TP_PCT else None] if b]
+                        badge = "+".join(badges) if badges else "-"
+                        bot.log(f"  [{i}/{len(rows)}] {r['code']:<6} {max(r['qty'] // 100, 1):>4}lot "
+                                f"avg{r['avg']:.0f} cur{r['current']:.0f} {r['flat']:+,.0f} [{badge}]")
+                else:
+                    bot.log("HOLDING: 0 posisi")
+            except Exception as e:
+                bot.log(f"holding log error: {e}")
+            # EKSEKUSI: sinyal top-15 + sinyal posisi (SHORT posisi = EXIT LONG otomatis)
+            if auto_execute:
+                act = [r for r in res if r["action"] != "HOLD"] + pos_res
                 if act:
                     plans = bot.execute_signals(act, min_score=min_score, live=bot.live)
                     if plans:
@@ -799,18 +825,6 @@ def run_loop(bot, cycle_minutes=CYCLE_MINUTES, interval=SCAN_INTERVAL,
                                 f"SELL {p['symbol']} {p['qty_lot']}lot @{p['price']}" for p in plans))
             except Exception as e:
                 bot.log(f"exit check error: {e}")
-            # HOLDING — log posisi saat ini (biar keliatan bot jalan)
-            try:
-                f = bot.flat_positions()
-                if f["rows"]:
-                    bot.log(f"HOLDING ({len(f['rows'])}): " + " | ".join(
-                        f"{r['code']} {max(r['qty'] // 100, 1)}lot avg{r['avg']:.0f} "
-                        f"cur{r['current']:.0f} {r['flat']:+,.0f}"
-                        for r in f["rows"][:8]) + f" | flat {f['total_flat']:+,.0f}")
-                else:
-                    bot.log("HOLDING: 0 posisi")
-            except Exception as e:
-                bot.log(f"holding log error: {e}")
             if not new_sig:
                 bot.log(f"scan ok ({len(res)} saham, tidak ada sinyal baru)")
         except Exception as e:
