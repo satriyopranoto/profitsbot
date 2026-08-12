@@ -1,0 +1,3 @@
+# Profits bot dependencies
+websocket-client>=1.6.0        # WS streaming (wss://stream.profits.co.id)
+pycryptodome>=3.19.0           # AES utk enkripsi password login (Crypto.Cipher)
