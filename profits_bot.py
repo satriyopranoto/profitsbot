@@ -48,7 +48,7 @@ TEST_SYMBOL = os.environ.get("PROFITS_TEST_SYMBOL", "").upper()  # test cycle la
 USE_FLIP = os.environ.get("PROFITS_FLIP", os.environ.get("PROFITS_USE_FLIP", "1")) == "1"
 CYCLE_MINUTES = float(os.environ.get("PROFITS_CYCLE_MINUTES", "3"))  # loop scan (menit)
 SCAN_INTERVAL = os.environ.get("PROFITS_SCAN_INTERVAL", "15m")  # timeframe sinyal (Yahoo)
-AUTO_EXECUTE = os.environ.get("PROFITS_AUTO_EXECUTE", "0") == "1"  # eksekusi otomatis (DRY-RUN)
+AUTO_EXECUTE = (BOT_MODE == "trade")  # otomatis: nontrade = scan&log; trade = eksekusi real
 MARKET_HOURS = os.environ.get("PROFITS_MARKET_HOURS", "0") == "1"  # 0 = 24 jam (testing); 1 = cuma jam bursa
 MARKET_OPEN = os.environ.get("PROFITS_MARKET_OPEN", "09:00")  # jam pasar WIB (kalau MARKET_HOURS=1)
 MARKET_CLOSE = os.environ.get("PROFITS_MARKET_CLOSE", "15:30")
@@ -803,7 +803,7 @@ def main():
     loop = "--loop" in args
     cycle = CYCLE_MINUTES
     interval = SCAN_INTERVAL
-    auto_execute = AUTO_EXECUTE
+    auto_execute = live  # nontrade = scan&log; trade = eksekusi real (1 kontrol saja)
     for i, a in enumerate(args):
         if a == "--symbols" and i + 1 < len(args):
             symbols = args[i + 1].split(",")
