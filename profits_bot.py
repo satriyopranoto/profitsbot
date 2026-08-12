@@ -849,6 +849,14 @@ def run_loop(bot, cycle_minutes=CYCLE_MINUTES, interval=SCAN_INTERVAL,
                     bot.log("HOLDING: 0 posisi")
             except Exception as e:
                 bot.log(f"holding log error: {e}")
+            # CASH — sisa cash real tiap cycle (biar tahu kondisi uang)
+            try:
+                bal = bot.get_balance()
+                cash = (bal.get("data") or {}).get("cash")
+                if cash is not None:
+                    bot.log(f"CASH: Rp{cash:,.0f}")
+            except Exception as e:
+                bot.log(f"cash log error: {e}")
             # EKSEKUSI: sinyal top-15 + sinyal posisi (SHORT posisi = EXIT LONG otomatis)
             if auto_execute:
                 act = [r for r in res if r["action"] != "HOLD"] + pos_res
