@@ -20,6 +20,7 @@ import threading
 import time
 
 import profits_client as pc
+pc.load_env()  # ⚠️ WAJIB SEBELUM config dievaluasi — kalau tidak .env nggak kebaca!
 from profits_ws import parse_price
 import indicators as ind
 
