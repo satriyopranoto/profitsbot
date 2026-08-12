@@ -657,12 +657,21 @@ class ProfitsBot:
                 # cap budget ORDER_VALUE (kalau > 0)
                 if ORDER_VALUE > 0:
                     qty_lot = min(qty_lot, max(int(ORDER_VALUE // (price * 100)), 1))
-                # guard akumulasi: total semua order plan <= cash (anti over-leverage!)
+                # guard akumulasi + PARTIAL SIZING: total semua order <= cash
+                # (anti over-leverage!) — kalau sizing gede tapi cash kurang,
+                # turunkan lot ke nilai TERDEKAT yang muat (>= 1 lot)
                 if cash_left is not None:
                     val = qty_lot * 100 * price
                     if val > cash_left:
-                        self.log(f"[SKIP] {code} Rp{val:,.0f} > sisa cash Rp{cash_left:,.0f} (akumulasi)")
-                        continue
+                        afford = int(cash_left // (100 * price))
+                        if afford >= 1:
+                            self.log(f"  partial {code}: sizing {qty_lot}lot Rp{val:,.0f} > cash "
+                                     f"Rp{cash_left:,.0f} -> turun ke {afford}lot Rp{afford*100*price:,.0f}")
+                            qty_lot = afford
+                            val = qty_lot * 100 * price
+                        else:
+                            self.log(f"[SKIP] {code} min 1 lot Rp{100*price:,.0f} > sisa cash Rp{cash_left:,.0f}")
+                            continue
                     cash_left -= val
                 plan = self.place_order(code, qty_lot, is_buy=True, price=price,
                                         order_type="limit")

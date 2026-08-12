@@ -204,7 +204,9 @@ Payload createOrder (TERVERIFIKASI LIVE 2026-08-12):
   ranking persis stocktrade: sort (rekomendasi BUY3/SHORT2, adx_sma_pct, value) desc — TIDAK memfilter.
 - `execute_signals(results, min_score=1, live=False)` — BUY: syarat uptrend kuat (adx_sma_pct>=35,
   default) + skip kalau sudah punya posisi (anti-numpuk), harga real-time (fallback chain),
-  GUARD AKUMULASI cash (total plan <= cash); SHORT: skip kalau tidak punya posisi,
+  GUARD AKUMULASI cash (total plan <= cash) + PARTIAL SIZING: kalau sizing
+  gede tapi cash kurang -> lot diturunkan ke nilai TERDEKAT yang muat (>=1 lot),
+  bukan skip total (mis. butuh 12jt, cash 9jt -> beli 9jt); SHORT: skip kalau tidak punya posisi,
   kalau punya = EXIT LONG (FLIP=1 penuh / 1 lot). DRY-RUN default, --live eksplisit.
 - `check_exit(tp_pct)` — posisi dgn floating profit > PROFITS_TP_PCT (0.5%) -> SELL (exit long TP).
 - Contoh scan 15m: BUY JECX/MEDC/MMIX; SHORT ANTM/PTBA (bearish kuat).
