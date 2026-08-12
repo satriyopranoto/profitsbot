@@ -145,6 +145,9 @@ class ProfitsBot:
         """
         r = pc._req("GET", "/trade-book/trade-book/top-stocks", token=self.ensure_token())
         items = r.get("data") or []
+        self._top_error = ""
+        if not items and r.get("message"):
+            self._top_error = str(r.get("message"))[:120]
         rows = []
         for it in items:
             b = it.get("buy") or {}
@@ -607,7 +610,8 @@ class ProfitsBot:
             values = {b["code"]: b.get("val", 0) for b in tv}
             if not tv and not getattr(self, "_fb_warned", False):
                 self._fb_warned = True
-                self.log(f"top-stocks kosong (data harian di-clear) — fallback ke SYMBOLS: {codes}")
+                why = getattr(self, "_top_error", "") or "data kosong (server di-clear?)"
+                self.log(f"top-stocks kosong/gagal ({why}) — fallback ke SYMBOLS: {codes}")
         results = []
         for c in codes:
             try:
@@ -905,31 +909,50 @@ def run_loop(bot, cycle_minutes=CYCLE_MINUTES, interval=SCAN_INTERVAL,
         _t.sleep(max(cycle_minutes * 60, 10))
 
 
+def _pid_alive(pid):
+    """Cek proses hidup (cross-platform). Windows: tasklist /FI."""
+    import os as _os
+    if _os.name == "nt":
+        out = _os.popen(f"tasklist /FI \"PID eq {pid}\"").read()
+        return str(pid) in out and "python" in out.lower()
+    try:
+        _os.kill(pid, 0)  # sinyal 0 = cek hidup
+        return True
+    except OSError:
+        return False
+
+
 def _single_instance_lock():
     """Cegah 2 bot jalan bersamaan (RACE CONDITION -> double order -> cash minus!).
 
-    Lock file berisi PID; kalau proses dengan PID itu MASIH HIDUP -> tolak start.
+    Lock file berisi PID, dibuat ATOMIK (O_EXCL) — 2 proses yang start di
+    detik yang sama TIDAK bisa dua-duanya lolos (insiden 2026-08-12: 2
+    profitsbot start bareng, lock lama tidak atomic -> dua-duanya jalan).
+    Lock stale (PID mati) dibersihkan otomatis.
     """
     import os as _os
     lock = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "bot.lock")
     try:
-        if _os.path.exists(lock):
-            old_pid = int(open(lock).read().strip() or 0)
-            if old_pid and _os.name == "nt":
-                # Windows: cek via tasklist (perintah eksternal cepat)
-                out = _os.popen(f"tasklist /FI \"PID eq {old_pid}\"").read()
-                if str(old_pid) in out and "python" in out.lower():
-                    return False, f"bot lain masih jalan (PID {old_pid})"
-            elif old_pid:
+        for _attempt in (1, 2):
+            try:
+                fd = _os.open(lock, _os.O_CREAT | _os.O_EXCL | _os.O_WRONLY)
+                _os.write(fd, str(_os.getpid()).encode())
+                _os.close(fd)
+                return True, lock
+            except FileExistsError:
                 try:
-                    _os.kill(old_pid, 0)  # sinyal 0 = cek hidup
+                    old_pid = int(open(lock).read().strip() or 0)
+                except Exception:
+                    old_pid = 0
+                if old_pid and _pid_alive(old_pid):
                     return False, f"bot lain masih jalan (PID {old_pid})"
-                except OSError:
+                try:
+                    _os.remove(lock)  # stale (PID mati) — bersihkan
+                except Exception:
                     pass
-        open(lock, "w").write(str(_os.getpid()))
-        return True, lock
+        return False, "lock bermasalah — hapus bot.lock manual lalu start ulang"
     except Exception:
-        return True, lock
+        return True, lock  # fail-open: jangan blokir kalau lock error aneh
 
 
 def main():
