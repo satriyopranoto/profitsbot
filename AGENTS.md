@@ -157,6 +157,24 @@ Payload createOrder (TERVERIFIKASI LIVE 2026-08-12):
 - `profits_bot.real_time_price(code)` -> {source: protrader|yahoo, bid, ask, last, vol, ts}.
 - Data indikator OHLC tetap dari Yahoo (delay OK utk MA/ADX 15m/harian).
 
+## CONFIG LENGKAP (env — analog .env protraderbot) — TERVERIFIKASI
+- CHART: PROFITS_CHART_RESOLUTION (15) & PROFITS_CHART_COUNTBACK (2000, best effort —
+  Yahoo: 1m~390 bar, 15m~145 bar/5d, 1d~247 bar/1y; 3/45/120/240m → interval terdekat).
+- INDIKATOR: PROFITS_ADX_PERIOD (14), PROFITS_ADX_THRESHOLD (20), PROFITS_ADX_CROSS (15),
+  PROFITS_DONCHIAN_PERIOD (10 — SL lookback = 2.8x = 28 bar),
+  PROFITS_BOLLINGER_PERIOD (20), PROFITS_BOLLINGER_STD (2).
+- WATCHLIST/FILTER: PROFITS_TOP_VALUES (15), PROFITS_FILTER_DISCRETE (1),
+  PROFITS_MAX_FLAT_PCT (50) — % bar flat > max -> HOLD "DISCRETE".
+- MODE: PROFITS_BOT_MODE (nontrade|trade), PROFITS_TRADE_LOT (0 = sizing), PROFITS_TEST_SYMBOL
+  (test cycle langsung di saham itu), PROFITS_USE_FLIP / PROFITS_FLIP (1), PROFITS_CYCLE_MINUTES (3).
+- SIZING (persis protraderbot sizing.py): TRADE_LOT=0 ->
+  risk_amount = CAPITAL * RISK_PCT/100; lot = floor(risk_amount / (|price-sl| * 100)).
+  ORDER_VALUE=0 -> tanpa cap (guard akumulasi cash yg batasi); >0 -> cap nilai/order.
+  PROFITS_CAPITAL (100jt), PROFITS_RISK_PCT (1.0).
+- Alias: PROFITS_SL_DONCHIAN_PERIOD (= DONCHIAN_PERIOD default).
+- Terverifikasi: JECX 99 lot (risk 1jt / |1320-1219|*100); SL 1219 (lookback 28);
+  MEDC di-skip (Rp29jt > sisa cash).
+
 ## PARAMETER (env — analog protraderbot BOT_MODE/dll)
 - PROFITS_BOT_MODE=nontrade|trade — nontrade = DRY-RUN scan/log (default); trade = order real.
   CLI: --nontrade/--dry-run | --trade/--live (--live alias lama tetap ada).
