@@ -734,6 +734,10 @@ class ProfitsBot:
                         self.log(f"  SL plan {code}: trigger {sl_price} (lookback {sl.get('lookback')} bar, Donchian lower {sl.get('lower')})")
             elif r["action"] == "SHORT" and r["score"] >= min_score:
                 code = r["code"]
+                # FLIP off -> sinyal SHORT TIDAK dieksekusi (exit hanya TP)
+                if not FLIP:
+                    self.log(f"[SKIP] {code} sinyal SHORT tapi FLIP off — exit hanya TP (fl>0.5% & close<SL)")
+                    continue
                 # sinyal SHORT = pemicu EXIT LONG (IDX cash-only: ga bisa short beneran)
                 # -> jual posisi yang dipunya; kalau tidak punya -> skip
                 if code not in positions:
