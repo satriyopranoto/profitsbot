@@ -203,13 +203,32 @@ Payload createOrder (TERVERIFIKASI LIVE 2026-08-12):
 - `scan_signals(codes=None)` — default scan TOP VALUES 15 (top-stocks, fallback SYMBOLS) — ~2s/15 saham;
   ranking persis stocktrade: sort (rekomendasi BUY3/SHORT2, adx_sma_pct, value) desc — TIDAK memfilter.
 - `execute_signals(results, min_score=1, live=False)` — BUY: syarat uptrend kuat (adx_sma_pct>=35,
-  default) + skip kalau sudah punya posisi (anti-numpuk), harga real-time (fallback chain),
+  default) + skip kalau sudah punya posisi (anti-numpuk), harga = BEST ASK (order-book, fallback last),
   GUARD AKUMULASI cash (total plan <= cash) + PARTIAL SIZING: kalau sizing
   gede tapi cash kurang -> lot diturunkan ke nilai TERDEKAT yang muat (>=1 lot),
   bukan skip total (mis. butuh 12jt, cash 9jt -> beli 9jt); SHORT: skip kalau tidak punya posisi,
   kalau punya = EXIT LONG (FLIP=1 penuh / 1 lot). DRY-RUN default, --live eksplisit.
-- `check_exit(tp_pct)` — posisi dgn floating profit > PROFITS_TP_PCT (0.5%) -> SELL (exit long TP).
+- `check_exit(tp_pct)` — posisi dgn floating profit > PROFITS_TP_PCT (0.5%) -> SELL DI BID (best bid,
+  persis protraderbot FLIP 'jual di bid' — langsung kena, tidak ngantri/ngunci posisi).
+- **BELI DI ASK / JUAL DI BID**: `order_book(code)` = GET /catalog/company/<CODE>/order-book
+  -> {bids:[{price,...}], offers:[...]} — best bid = bids[0].price, best ask = offers[0].price.
+- **SHORT (sinyal) vs SELL (exit long)**: SHORT = sinyal bearish -> pemicu EXIT LONG (jual posisi yg
+  dipunya); SELL = tindakan exit long dari TP check. Guard cash HANYA utk BUY (SELL tidak diblokir!).
 - Contoh scan 15m: BUY JECX/MEDC/MMIX; SHORT ANTM/PTBA (bearish kuat).
+
+## Loop & keselamatan (2026-08-12 — pelajaran mahal!)
+- `run_loop`: scan top-15 (log per-saham ala protraderbot) -> HOLDING baris TURUN per posisi
+  + badge sinyal [BUY]/[SHORT]/[TP] (TP = floating > TP_PCT) -> log CASH tiap cycle
+  -> execute (top-15 + sinyal posisi lama — SHORT posisi = EXIT LONG otomatis) -> check_exit TP.
+- **SINGLE-INSTANCE LOCK** (`bot.lock`, PID): bot kedua TOLAK start kalau ada bot hidup —
+  WAJIB! Server Profits TIDAK kick 2 login (2 proses bisa order bersamaan!) — insiden
+  2026-08-12: 2 bot racing -> CUAN 4+4 & BREN 17+17 double order -> cash MINUS -3,2jt.
+- **PROFITS_BOT_MODE = satu-satunya kontrol**: nontrade (scan&log) | trade (eksekusi real).
+  AUTO_EXECUTE SUDAH DIHAPUS (dulu bikin bingung). CLI --nontrade/--trade override .env.
+- **JANGAN jalanin bot utk user** ("aku aja") — user yang start loop; asisten hanya verifikasi
+  (tasklist/wmic/powershell Get-CimInstance utk cek proses python hidup).
+- Partial sizing log: "partial CODE: sizing Xlot RpY > cash RpZ -> turun ke Wlot".
+- Exit TP log: "EXIT TP CODE: +X% (avg A -> cur B)" lalu "jual DI BID CODE: bid B (last C)".
 
 ## Indikator (indicators.py + OHLC Yahoo .JK)
 - SMA/EMA/RSI/MACD/Bollinger/Donchian/ATR — dari close.
