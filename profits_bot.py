@@ -96,6 +96,7 @@ class ProfitsBot:
         r = pc.login(u, p)
         if not pc._session:
             raise RuntimeError(f"login gagal: {r}")
+        _tok_ts["t"] = time.time()  # token fresh — jangan langsung refresh
         self.log("login OK — user", (r.get("data") or {}).get("user", {}).get("name", "?"))
         return pc._session
 
@@ -112,6 +113,14 @@ class ProfitsBot:
 
     def refresh(self):
         rt = pc._session.get("refreshToken")
+        if not rt:
+            # session kehilangan refreshToken -> full re-login, bukan cuma refresh
+            self.log("refreshToken kosong — re-login penuh")
+            try:
+                self.login()
+            except Exception as e:
+                self.log("re-login gagal:", e)
+            return
         r = pc._req("POST", "/identity/refresh", {"refreshToken": rt})
         tok = (r.get("data") or {}).get("token") or r.get("data") or r.get("token")
         if tok and tok.get("accessToken"):
@@ -119,7 +128,12 @@ class ProfitsBot:
             _tok_ts["t"] = time.time()
             self.log("token refreshed")
         else:
+            # refresh ditolak (400/401) -> session basi -> re-login penuh
             self.log("refresh gagal:", json.dumps(r)[:150])
+            try:
+                self.login()
+            except Exception as e:
+                self.log("re-login setelah refresh gagal:", e)
 
     def trade_login(self):
         """Login trading dengan PIN -> tradeAccessToken (utk portfolio/order)."""
@@ -517,6 +531,8 @@ class ProfitsBot:
         import urllib.request
         from concurrent.futures import ThreadPoolExecutor
         out = dict(fallback_map or {})
+        if not codes:
+            return out  # 0 posisi -> jangan buat ThreadPoolExecutor(0) (crash)
 
         def _one(code):
             try:
