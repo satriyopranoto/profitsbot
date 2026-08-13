@@ -208,10 +208,12 @@ Payload createOrder (TERVERIFIKASI LIVE 2026-08-12):
   gede tapi cash kurang -> lot diturunkan ke nilai TERDEKAT yang muat (>=1 lot),
   bukan skip total (mis. butuh 12jt, cash 9jt -> beli 9jt); SHORT: skip kalau tidak punya posisi,
   kalau punya = EXIT LONG (FLIP=1 penuh / 1 lot). DRY-RUN default, --live eksplisit.
-- `check_exit(tp_pct)` — SELL jika: floating_pct > PROFITS_TP_PCT (0.5%) **AND** close < SL
-  Donchian trailing (persis exit_check protraderbot — logika AND, BUKAN OR!). Trailing TP:
-  profit > 0,5% BELUM dijual — baru jual kalau harga BALIK tembus SL trigger (profit dikunci
-  dari atas). Jual DI BID (best bid, 'jual di bid' — langsung kena, tidak ngantri).
+- `check_exit(tp_pct, basis_period=20)` — SELL jika: floating_pct > PROFITS_TP_PCT (0.5%)
+  **AND** close < BASIS (SMA20) — paritas EA TPBasis/protraderbot (commit c86280e;
+  basis_price() = ind.sma return FLOAT). Trailing TP: profit > 0,5% BELUM dijual —
+  baru jual kalau harga BALIK tembus basis (profit dikunci dari atas). Jual DI BID
+  (best bid, 'jual di bid' — langsung kena, tidak ngantri). `sl_donchian_plan` tetap
+  dipakai utk SL order, bukan exit.
 - **BELI DI ASK / JUAL DI BID**: `order_book(code)` = GET /catalog/company/<CODE>/order-book
   -> {bids:[{price,...}], offers:[...]} — best bid = bids[0].price, best ask = offers[0].price.
 - **SHORT (sinyal) vs SELL (exit long)**: SHORT = sinyal bearish -> pemicu EXIT LONG (jual posisi yg
