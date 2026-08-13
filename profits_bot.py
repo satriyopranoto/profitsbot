@@ -145,10 +145,45 @@ class ProfitsBot:
         tok = (r.get("data") or {}).get("token") or (r.get("data") if isinstance(r.get("data"), dict) else None)
         if tok and tok.get("accessToken"):
             pc._trade_session = tok
+            _trade_ts["t"] = time.time()
             self.log("trade login OK (PIN)")
         else:
             self.log("trade login GAGAL:", json.dumps(r, ensure_ascii=False)[:200])
         return pc._trade_session
+
+    def ensure_trade_token(self):
+        """Jamin trade token valid — refresh kalau basi, re-login kalau
+        refresh ditolak. (Self-healing trade session — sebelumnya cuma cek
+        ADA/TIDAK, token basi -> SEMUA /portfolio/* & order 401 UNAUTHORIZED.)"""
+        s = pc._trade_session
+        if not s:
+            self.trade_login()
+            s = pc._trade_session
+            if not s:
+                return None
+        exp = s.get("accessExpired") or 3600
+        if (time.time() - _trade_ts.get("t", 0)) > max(exp - 120, 60):
+            rt = s.get("refreshToken")
+            if rt:
+                try:
+                    r = pc._req("POST", "/identity/trade/refresh",
+                                {"refreshToken": rt})
+                    tok = (r.get("data") or {}).get("token") or \
+                        (r.get("data") if isinstance(r.get("data"), dict) else None)
+                    if tok and tok.get("accessToken"):
+                        pc._trade_session = tok
+                        _trade_ts["t"] = time.time()
+                        self.log("trade token refreshed")
+                        return tok.get("accessToken")
+                except Exception as e:
+                    self.log("trade refresh gagal:", e)
+            # refresh kosong/ditolak -> re-login penuh
+            self.log("trade token basi — re-login trade penuh")
+            try:
+                self.trade_login()
+            except Exception as e:
+                self.log("re-login trade gagal:", e)
+        return pc._trade_session.get("accessToken") if pc._trade_session else None
 
     # ---- data pasar ----
     def top_values(self, n=15):
@@ -186,8 +221,7 @@ class ProfitsBot:
         /portfolio/stock -> [{code, available, total, avgPrice, price, company}]
         flat = (current - avgPrice) * total
         """
-        if not pc._trade_session:
-            self.trade_login()
+        self.ensure_trade_token()
         r = pc._req("GET", "/portfolio/stock",
                     token=pc._trade_session.get("accessToken"))
         rows = []
@@ -291,23 +325,19 @@ class ProfitsBot:
         return d
 
     def get_balance(self):
-        if not pc._trade_session:
-            self.trade_login()
+        self.ensure_trade_token()
         return pc._req("GET", "/portfolio/balance", token=pc._trade_session.get("accessToken") if pc._trade_session else None)
 
     def get_stocks(self):
-        if not pc._trade_session:
-            self.trade_login()
+        self.ensure_trade_token()
         return pc._req("GET", "/portfolio/stock", token=pc._trade_session.get("accessToken") if pc._trade_session else None)
 
     def get_orders(self):
-        if not pc._trade_session:
-            self.trade_login()
+        self.ensure_trade_token()
         return pc._req("GET", "/portfolio/order", token=pc._trade_session.get("accessToken") if pc._trade_session else None)
 
     def get_orders_done(self):
-        if not pc._trade_session:
-            self.trade_login()
+        self.ensure_trade_token()
         return pc._req("GET", "/portfolio/order/done", token=pc._trade_session.get("accessToken") if pc._trade_session else None)
 
     # ---- order ----
@@ -346,8 +376,7 @@ class ProfitsBot:
         if not self.live:
             self.log("[DRY-RUN] ORDER PLAN:", json.dumps(plan, ensure_ascii=False))
             return plan
-        if not pc._trade_session:
-            self.trade_login()
+        self.ensure_trade_token()
         req = pc._req("POST", "/portfolio/order", payload,
                       token=pc._trade_session.get("accessToken"),
                       extra={"X-APP-FORM": "ro"})
@@ -380,16 +409,14 @@ class ProfitsBot:
         if not self.live:
             self.log("[DRY-RUN] STOP LOSS PLAN:", json.dumps(payload, ensure_ascii=False))
             return payload
-        if not pc._trade_session:
-            self.trade_login()
+        self.ensure_trade_token()
         r = pc._req("POST", "/automation/stoploss", payload,
                     token=pc._trade_session.get("accessToken"))
         self.log("[LIVE] stop loss:", json.dumps(r, ensure_ascii=False)[:250])
         return r
 
     def get_stop_losses(self):
-        if not pc._trade_session:
-            self.trade_login()
+        self.ensure_trade_token()
         return pc._req("GET", "/automation/stoploss",
                        token=pc._trade_session.get("accessToken"))
 
@@ -399,14 +426,12 @@ class ProfitsBot:
         TERVERTIFIKASI: type WAJIB di URL (mis. "stoploss") —
         /automation/<id>/cancel -> 404 NOT_FOUND!
         """
-        if not pc._trade_session:
-            self.trade_login()
+        self.ensure_trade_token()
         return pc._req("POST", f"/automation/{auto_type}/{auto_id}/cancel",
                        token=pc._trade_session.get("accessToken"))
 
     def cancel_order(self, order_id):
-        if not pc._trade_session:
-            self.trade_login()
+        self.ensure_trade_token()
         return pc._req("POST", f"/portfolio/order/{order_id}/cancel",
                        token=pc._trade_session.get("accessToken"))
 
@@ -842,6 +867,7 @@ class ProfitsBot:
 
 
 _tok_ts = {"t": 0}
+_trade_ts = {"t": 0}   # timestamp trade token terakhir di-refresh (self-healing)
 
 
 # ------------------------- main -------------------------
