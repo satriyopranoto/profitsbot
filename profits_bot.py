@@ -35,10 +35,14 @@ ADX_PERIOD = int(os.environ.get("PROFITS_ADX_PERIOD", "14"))  # period ADX (Wild
 ADX_THRESHOLD = float(os.environ.get("PROFITS_ADX_THRESHOLD", "20"))  # minimal ADX utk sinyal tren
 ADX_CROSS = float(os.environ.get("PROFITS_ADX_CROSS", "15"))  # ADX min utk deteksi cross
 DONCHIAN_PERIOD = int(os.environ.get("PROFITS_DONCHIAN_PERIOD", "10"))  # SL lookback = 2.8x period
+DONCHIAN_MULTIPLE = float(os.environ.get("PROFITS_DONCHIAN_MULTIPLE", "2.8"))  # SL multiple
 BOLLINGER_PERIOD = int(os.environ.get("PROFITS_BOLLINGER_PERIOD", "20"))
 BOLLINGER_STD = float(os.environ.get("PROFITS_BOLLINGER_STD", "2"))
 # --- watchlist & filter ---
 TOP_VALUES = int(os.environ.get("PROFITS_TOP_VALUES", "15"))  # top N by value
+# Min nilai transaksi (Rp) utk lolos filter top-stocks — skip saham kecil/garing
+# saat market dry (buang SLIS/GPRA/ADMR/INCO 7-12M). 0 = nonaktif.
+MIN_TOP_VAL = int(os.environ.get("PROFITS_MIN_TOP_VAL", "15000000000"))
 FILTER_DISCRETE = os.environ.get("PROFITS_FILTER_DISCRETE", "1") == "1"  # skip saham flat
 MAX_FLAT_PCT = float(os.environ.get("PROFITS_MAX_FLAT_PCT", "50"))  # threshold flat %
 # --- mode & eksekusi ---
@@ -191,7 +195,11 @@ class ProfitsBot:
 
         Format: [{buy: {code, curr, change, val, freq, lot, avg}, sell: {...}}]
         Ambil item teratas dari sisi buy (val terbesar).
+        FILTER (paritas protraderbot):
+          - REGULAR: kode 4 huruf kapital (^[A-Z]{4}$) — buang saham kecil/liar
+          - MIN_VAL: skip kalau val < MIN_TOP_VAL (anti saham garing saat market dry)
         """
+        import re as _re
         r = pc._req("GET", "/trade-book/trade-book/top-stocks", token=self.ensure_token())
         items = r.get("data") or []
         self._top_error = ""
@@ -200,7 +208,13 @@ class ProfitsBot:
         rows = []
         for it in items:
             b = it.get("buy") or {}
-            rows.append((b.get("val") or 0, b))
+            code = str(b.get("code") or "")
+            val = b.get("val") or 0
+            if not _re.match(r"^[A-Z]{4}$", code):
+                continue  # bukan regular stocks (paritas protraderbot)
+            if val < MIN_TOP_VAL:
+                continue  # market dry / saham garing — skip
+            rows.append((val, b))
         rows.sort(key=lambda x: x[0], reverse=True)
         return [b for _, b in rows[:n]]
 
@@ -236,14 +250,14 @@ class ProfitsBot:
                          "current": cur, "flat": round(flat)})
         rows.sort(key=lambda z: z["flat"])
         return {"rows": rows, "total_flat": round(tot)}
-    def check_exit(self, tp_pct=0.5, basis_period=20):
-        """Exit check — TAKE PROFIT pakai BASIS (SMA20), paritas EA TPBasis.
+    def check_exit(self, tp_pct=0.5, dc_mult=2.8, dc_per=10):
+        """Exit check — TAKE PROFIT pakai SL DONCHIAN (trailing), paritas EA Strong klasik.
 
-        SELL jika: floating_pct > tp_pct  AND  close < basis (SMA20).
+        SELL jika: floating_pct > tp_pct  AND  close < sl (Donchian).
         - floating_pct = (current - avg) / avg * 100   (avg dari holding)
-        - basis = SMA20 terbaru (BUKAN Donchian SL — TP ikut basis)
+        - sl = Donchian SL terbaru (LLV utk long, HHV utk short — high/low asli)
         Jadi profit > 0,5% BELUM dijual — baru jual kalau close balik tembus
-        SMA20 (profit dikunci dari atas). BUKAN jual langsung di +0,5%!
+        SL Donchian (trailing trigger). BUKAN jual langsung di +0,5%!
         """
         f = self.flat_positions()
         rows = f["rows"]
@@ -258,17 +272,32 @@ class ProfitsBot:
             flat_pct = (cur - avg) / avg * 100
             if flat_pct <= tp_pct:
                 continue  # syarat 1: floating > tp_pct
-            # syarat 2 (AND): close < BASIS (SMA20) — trailing trigger
-            basis = self.basis_price(r["code"], SCAN_INTERVAL, basis_period)
-            if basis is None:
-                continue  # basis n/a -> jangan jual (fail-safe)
-            if cur >= basis:
-                continue  # harga BELUM balik tembus basis -> HOLD
+            # syarat 2 (AND): close < SL DONCHIAN (trailing trigger)
+            sl = self.sl_donchian_price(r["code"], SCAN_INTERVAL, dc_mult, dc_per)
+            if sl is None:
+                continue  # SL n/a -> jangan jual (fail-safe)
+            if cur >= sl:
+                continue  # harga BELUM balik tembus SL -> HOLD
             exits.append({"code": r["code"], "qty_lot": max(int(qty // 100), 1),
                           "price": cur, "avg": avg, "flat_pct": round(flat_pct, 2),
-                          "basis": round(basis)})
+                          "sl": round(sl)})
         exits.sort(key=lambda z: -z["flat_pct"])
         return exits
+
+    def sl_donchian_price(self, code, interval="15m", dc_mult=2.8, dc_per=10):
+        """SL Donchian high/low asli (paritas EA Strong / protraderbot donchian_sl).
+
+        Lookback = dc_mult x dc_per bar. Utk posisi LONG: SL = min(low, lookback)
+        (LLV). Return float atau None kalau data kurang.
+        """
+        lookback = max(int(dc_mult * dc_per), 5)
+        ohlc = self.fetch_ohlc(code, interval, "5d")
+        if isinstance(ohlc, dict) or len(ohlc) < lookback:
+            return None
+        lows = [x.get("l") for x in ohlc[-lookback:]]
+        if not lows or any(x is None for x in lows):
+            return None
+        return min(lows)
 
     def basis_price(self, code, interval="15m", basis_period=20):
         """Basis = SMA20 close terakhir (paritas EA TPBasis / protraderbot).
@@ -990,10 +1019,12 @@ def run_loop(bot, cycle_minutes=CYCLE_MINUTES, interval=SCAN_INTERVAL,
                                 for p in plans))
             # EXIT CHECK — TAKE PROFIT dari holding (ala protraderbot)
             try:
-                exits = bot.check_exit(tp_pct=TP_PCT)
+                exits = bot.check_exit(tp_pct=TP_PCT,
+                                       dc_mult=DONCHIAN_MULTIPLE,
+                                       dc_per=DONCHIAN_PERIOD)
                 if exits:
                     for e in exits:
-                        bot.log(f"EXIT TP {e['code']}: +{e['flat_pct']}% (avg {e['avg']:.0f} -> {e['price']:.0f})")
+                        bot.log(f"EXIT TP {e['code']}: +{e['flat_pct']}% (avg {e['avg']:.0f} -> {e['price']:.0f}, sl {e['sl']})")
                     if auto_execute:
                         plans = bot.execute_exits(exits, live=bot.live)
                         if plans:
