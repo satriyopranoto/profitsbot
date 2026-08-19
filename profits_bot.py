@@ -532,13 +532,29 @@ class ProfitsBot:
 
     # ---- siklus ----
     def fetch_ohlc(self, code, interval="15m", range_="5d"):
-        """OHLC asli dari Yahoo Finance (suffix .JK) — interval 1m/5m/15m/1d.
+        """OHLC multi-source (fallback chain):
 
-        Yahoo = sumber OHLC asli (chart Profits delay & API-nya cuma close
-        per-menit). Range: 1d (1m) / 5d (5m,15m) / 3mo-1y (1d).
-        Return list dict {t: epoch, o,h,l,c, v} urut waktu.
+        1. Bot protrader API lokal (/chart/<CODE>) — OHLC ChartCloud POEMS real-time
+        2. Yahoo Finance .JK (delay ~10 menit) — kalau bot protrader mati
+        Return list dict {t: epoch, o,h,l,c, v} urut waktu / {error: ...}.
         """
-        import urllib.request, urllib.error, time as _t
+        import urllib.request, urllib.error
+        # 1) protrader api_server: OHLC asli ChartCloud POEMS
+        res_map = {"1m": "1", "5m": "5", "15m": "15", "30m": "30", "45m": "45",
+                   "60m": "60", "1h": "60", "1d": "D", "D": "D"}
+        url = (f"{PROTRADER_API}/chart/{code}"
+               f"?resolution={res_map.get(interval, '15')}"
+               f"&countback=2000&days_back=10")
+        req = urllib.request.Request(url, headers={"User-Agent": "profitsbot/1.0"})
+        try:
+            with urllib.request.urlopen(req, timeout=25) as resp:
+                d = json.loads(resp.read().decode())
+            rows = d.get("data")
+            if isinstance(rows, list) and rows:
+                return rows
+        except Exception:
+            pass
+        # 2) fallback Yahoo (delay)
         url = (f"https://query1.finance.yahoo.com/v8/finance/chart/{code}.JK"
                f"?range={range_}&interval={interval}")
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
