@@ -155,11 +155,17 @@ Payload createOrder (TERVERIFIKASI LIVE 2026-08-12):
   — protraderbot/bot/api_server.py (PMP real-time: bid/ask/last) — timeout 8s.
 - Kalau bot protrader mati/nggak jawab -> fallback YAHOO .JK (delay ~10 menit).
 - `profits_bot.real_time_price(code)` -> {source: protrader|yahoo, bid, ask, last, vol, ts}.
-- Data indikator OHLC tetap dari Yahoo (delay OK utk MA/ADX 15m/harian).
+- OHLC indikator -> bot PROTRADER juga: `fetch_ohlc(code)` = GET http://127.0.0.1:8777/chart/<CODE>
+  ?resolution=<map>&countback=2000&days_back=10 -> {code, data:[{t,o,h,l,c,v}], bars}
+  (OHLC ChartCloud POEMS real-time — SUMBER UTAMA). Yahoo jadi fallback TERAKHIR kalau
+  api_server mati. Satu sumber = sinyal konsisten dgn protraderbot (TERVERIFIKASI 2026-08-19:
+  ISAT 147 bars, ADX 28.5/pct 24% ~= protraderbot 25.3/23%; sebelum fix Yahoo melenceng 3%
+  -> 'Uptrend Kuat 69%' PALSU). ⚠️ api_server 8777 WAJIB jalan utk data akurat.
 
 ## CONFIG LENGKAP (env — analog .env protraderbot) — TERVERIFIKASI
 - CHART: PROFITS_CHART_RESOLUTION (15) & PROFITS_CHART_COUNTBACK (2000, best effort —
-  Yahoo: 1m~390 bar, 15m~145 bar/5d, 1d~247 bar/1y; 3/45/120/240m → interval terdekat).
+  sumber utama = ChartCloud POEMS via api_server /chart (147 bar/10 hari utk 15m);
+  Yahoo fallback: 1m~390 bar, 15m~145 bar/5d, 1d~247 bar/1y; 3/45/120/240m → interval terdekat).
 - INDIKATOR: PROFITS_ADX_PERIOD (14), PROFITS_ADX_THRESHOLD (20), PROFITS_ADX_CROSS (15),
   PROFITS_DONCHIAN_PERIOD (10 — SL lookback = 2.8x = 28 bar),
   PROFITS_BOLLINGER_PERIOD (20), PROFITS_BOLLINGER_STD (2).
@@ -242,13 +248,16 @@ Payload createOrder (TERVERIFIKASI LIVE 2026-08-12):
 - Partial sizing log: "partial CODE: sizing Xlot RpY > cash RpZ -> turun ke Wlot".
 - Exit TP log: "EXIT TP CODE: +X% (avg A -> cur B)" lalu "jual DI BID CODE: bid B (last C)".
 
-## Indikator (indicators.py + OHLC Yahoo .JK)
+## Indikator (indicators.py + OHLC via api_server protrader)
 - SMA/EMA/RSI/MACD/Bollinger/Donchian/ATR — dari close.
 - ADX LENGKAP (+DI/-DI/ADX, Wilder) dari OHLC asli — adx_full(h,l,c,n).
-- OHLC ASLI = Yahoo Finance: https://query1.finance.yahoo.com/v8/finance/chart/<CODE>.JK
-  ?range=<1d|5d|3mo|1y>&interval=<1m|5m|15m|1d> — TANPA AUTH!
-  -> 15m = 111-145 titik (5 hari), 1d = 244 titik (1 tahun). TERVERIFIKASI.
-  (chart Profits = TradingView iframe delay & API Profits cuma close per-menit 335 titik)
+- OHLC ASLI = ChartCloud POEMS via api_server protrader:
+  GET http://127.0.0.1:8777/chart/<CODE>?resolution=<map>&countback=2000&days_back=10
+  -> {code, data:[{t,o,h,l,c,v}], bars} — TANPA AUTH (service lokal).
+  Map interval: 1m->1, 5m->5, 15m->15, 30m->30, 45m->45, 60m/1h->60, 1d/D->D.
+  15m = 147 bar/10 hari. Yahoo jadi fallback TERAKHIR kalau service mati.
+  (Sebelum 2026-08-19: OHLC murni Yahoo — kadang melenceng 3% dari bursa
+  -> ADX & uptrend pct bisa PALSU; fix: fetch_ohlc ambil dari api_server dulu.)
 - `profits_bot.fetch_ohlc(code, interval, range)` & `indicator_snapshot(code)`.
 - Contoh (15m): ANTM +DI 12.95/-DI 25.46/ADX 28.92 DOWN; PTBA ADX 63.15 DOWN kuat.
 
