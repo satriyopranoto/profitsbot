@@ -43,6 +43,10 @@ TOP_VALUES = int(os.environ.get("PROFITS_TOP_VALUES", "15"))  # top N by value
 # Min nilai transaksi (Rp) utk lolos filter top-stocks — skip saham kecil/garing
 # saat market dry (buang SLIS/GPRA/ADMR/INCO 7-12M). 0 = nonaktif.
 MIN_TOP_VAL = int(os.environ.get("PROFITS_MIN_TOP_VAL", "15000000000"))
+# HANYA beli saham harga >= MIN_PRICE (RUPIAH PENUH, mis. 100; 0 = nonaktif).
+# Filter fundamental — cegah saham murah ikut terbeli. Berlaku HANYA utk beli;
+# saham yg sudah di holding tetap boleh dijual (SHORT/TP exit tanpa filter harga).
+MIN_PRICE = int(os.environ.get("PROFITS_MIN_PRICE", "0"))
 FILTER_DISCRETE = os.environ.get("PROFITS_FILTER_DISCRETE", "1") == "1"  # skip saham flat
 MAX_FLAT_PCT = float(os.environ.get("PROFITS_MAX_FLAT_PCT", "50"))  # threshold flat %
 # --- mode & eksekusi ---
@@ -758,6 +762,19 @@ class ProfitsBot:
             except Exception as e:
                 results.append({"code": c, "action": "HOLD", "score": 0,
                                 "reasons": [f"err: {e}"], "value": values.get(c, 0)})
+        # Filter harga minimum (opsional): tandai BUY harga < MIN_PRICE utk
+        # ditampilkan SKIP-PRICE di listing scan (tidak ikut dibeli). Berlaku
+        # HANYA utk beli — SHORT (exit long) & TP tetap jalan tanpa filter.
+        # Paritas protraderbot MIN_PRICE.
+        if MIN_PRICE > 0:
+            for r in results:
+                if r["action"] == "BUY":
+                    last_px = (r.get("ind") or {}).get("last") or 0
+                    if last_px and last_px < MIN_PRICE:
+                        r["price_skip"] = True
+                        r.setdefault("reasons", []).append(
+                            f"PRICE-SKIP: harga {last_px:.0f} < MIN_PRICE({MIN_PRICE}) "
+                            f"— filter fundamental (beli hanya harga >= {MIN_PRICE})")
         # ranking PERSIS stocktrade screener (line 2513 app.py):
         #   sort by (rekomendasi, adx_sma_pct = statistic bullish, value) desc
         action_rank = {"BUY": 3, "SHORT": 2, "HOLD": 0}
@@ -812,6 +829,9 @@ class ProfitsBot:
         for r in results:
             if r["action"] == "BUY" and r["score"] >= min_score:
                 code = r["code"]
+                # ditandai di scan (harga < MIN_PRICE) — jangan dibeli
+                if r.get("price_skip"):
+                    continue
                 # syarat buy: HANYA uptrend kuat (statistic bullish >= UPTREND_MIN_PCT)
                 ind_s = r.get("ind") or {}
                 if BUY_UPTREND_ONLY and (ind_s.get("adx_sma_pct") or 0) < UPTREND_MIN_PCT:
@@ -831,6 +851,12 @@ class ProfitsBot:
                 if ask:
                     self.log(f"  beli DI ASK {code}: ask {ask} (last {price})")
                     price = int(ask)
+                # filter harga minimum (backstop): hanya beli saham harga >= MIN_PRICE
+                # (price_skip di scan pakai ind.last; di sini pakai harga beli riil ask/last)
+                if MIN_PRICE > 0 and price < MIN_PRICE:
+                    self.log(f"[SKIP] {code} harga {price} < MIN_PRICE({MIN_PRICE}) "
+                             f"— filter fundamental (beli hanya harga >= {MIN_PRICE})")
+                    continue
                 # SL utk sizing (risk-based) + rencana SL setelah posisi terisi
                 sl = self.sl_donchian_plan(code, SCAN_INTERVAL)
                 sl_price = sl.get("trigger") if sl and "trigger" in sl else None
@@ -967,8 +993,9 @@ def run_loop(bot, cycle_minutes=CYCLE_MINUTES, interval=SCAN_INTERVAL,
             for i, r in enumerate(res, 1):
                 ind = r.get("ind") or {}
                 comm = ind.get("trend_comment") or ""
+                act_disp = "SKIP-PRICE" if r.get("price_skip") else r["action"]
                 bot.log(
-                    f"[{i}/{len(res)}] {r['code']:<6} {r['action']:5s} [{comm}] "
+                    f"[{i}/{len(res)}] {r['code']:<6} {act_disp:10s} [{comm}] "
                     f"ADX={ind.get('adx', 0):.1f} +DI={ind.get('pdi', 0):.1f} "
                     f"-DI={ind.get('mdi', 0):.1f} last={ind.get('last', 0):.0f} "
                     f"SMA20={ind.get('sma20', 0):.0f} SL={ind.get('sl', 0):.0f} "
@@ -976,6 +1003,11 @@ def run_loop(bot, cycle_minutes=CYCLE_MINUTES, interval=SCAN_INTERVAL,
             new_sig = []
             for r in res:
                 if r["action"] == "HOLD":
+                    continue
+                if r.get("price_skip"):
+                    # BUY terfilter harga — tampil di listing, TIDAK dieksekusi
+                    bot.log(f"PRICE-SKIP {r['code']}: harga < MIN_PRICE({MIN_PRICE}) "
+                            f"— tidak dibeli (kalau di holding tetap boleh dijual)")
                     continue
                 key = (r["code"], r["action"])
                 if last_state.get(key) != r["score"]:
@@ -1148,6 +1180,8 @@ def _main(args):
     bot = ProfitsBot(live=live)
     bot.login()
     bot.trade_login()
+    if MIN_PRICE > 0:
+        print(f"[FILTER] MIN_PRICE={MIN_PRICE} aktif — HANYA beli saham harga >= {MIN_PRICE} (jual/exit bebas filter)")
     if live:
         print("!! TRADE MODE — order akan dikirim beneran !!")
     else:
