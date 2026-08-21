@@ -113,8 +113,10 @@ def main():
         oid = s.get("id")
         try:
             r = bot.cancel_automation(oid, "stoploss")
-            is_ok = not (isinstance(r, dict)
-                         and ("error" in r or "errors" in r))
+            # sukses = errors null/tidak ada + data UUID hadir. "errors": null
+            # BUKAN gagal (cek kehadiran key "errors" salah tanda -> salah report
+            # [FAIL] pdhl sukses, insiden CUAN 2026-08-21).
+            is_ok = not (isinstance(r, dict) and r.get("errors"))
             if is_ok:
                 cancelled.append(s)
                 print(f"  [OK] CANCEL {s.get('code',''):6s} trig={s.get('triggerPrice')} "
