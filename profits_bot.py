@@ -94,7 +94,7 @@ class ProfitsBot:
 
     def log(self, *a):
         if self.verbose:
-            print("[BOT]", *a, flush=True)
+            print(f"[{time.strftime('%H:%M:%S')}]", *a, flush=True)
 
     # ---- auth ----
     def login(self):
@@ -934,7 +934,7 @@ class ProfitsBot:
             d = self.get_price(code)
             if d:
                 chg = d.get("change", 0)
-                print(f"  {code}: {d.get('current')} ({chg:+g}) O:{d.get('open')} "
+                print(f"[{time.strftime('%H:%M:%S')}]  {code}: {d.get('current')} ({chg:+g}) O:{d.get('open')} "
                       f"H:{d.get('high')} L:{d.get('low')} P:{d.get('prev')}")
         # contoh sinyal placeholder: beli saat harga < prev*0.99 (downtrend 1%) — GANTI dgn strategi
         for code in symbols:
@@ -1138,8 +1138,8 @@ def main():
     args = _sys.argv[1:]
     ok, lock = _single_instance_lock()
     if not ok:
-        print(f"[BOT] TOLAK start: {lock} — stop dulu atau kill proses itu, lalu coba lagi!")
-        print("[BOT] (2 bot jalan bersamaan = double order — insiden cash minus 2026-08-12)")
+        print(f"[{time.strftime('%H:%M:%S')}] TOLAK start: {lock} — stop dulu atau kill proses itu, lalu coba lagi!")
+        print(f"[{time.strftime('%H:%M:%S')}] (2 bot jalan bersamaan = double order — insiden cash minus 2026-08-12)")
         return
     try:
         _main(args)
@@ -1181,17 +1181,17 @@ def _main(args):
     bot.login()
     bot.trade_login()
     if MIN_PRICE > 0:
-        print(f"[FILTER] MIN_PRICE={MIN_PRICE} aktif — HANYA beli saham harga >= {MIN_PRICE} (jual/exit bebas filter)")
+        print(f"[{time.strftime('%H:%M:%S')}] [FILTER] MIN_PRICE={MIN_PRICE} aktif — HANYA beli saham harga >= {MIN_PRICE} (jual/exit bebas filter)")
     if live:
-        print("!! TRADE MODE — order akan dikirim beneran !!")
+        print(f"[{time.strftime('%H:%M:%S')}] !! TRADE MODE — order akan dikirim beneran !!")
     else:
-        print("[NONTRADE/DRY-RUN] scan & log saja, tidak ada order dikirim.")
+        print(f"[{time.strftime('%H:%M:%S')}] [NONTRADE/DRY-RUN] scan & log saja, tidak ada order dikirim.")
     if loop:
         run_loop(bot, cycle_minutes=cycle, interval=interval, auto_execute=auto_execute)
         return
     bot.run_once(symbols)
     if not live:
-        print("\n[DRY-RUN] Tidak ada order dikirim. Untuk live: python profits_bot.py --live")
+        print(f"\n[{time.strftime('%H:%M:%S')}] [DRY-RUN] Tidak ada order dikirim. Untuk live: python profits_bot.py --live")
 
 
 if __name__ == "__main__":
