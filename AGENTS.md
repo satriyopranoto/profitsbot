@@ -265,6 +265,8 @@ Payload createOrder (TERVERIFIKASI LIVE 2026-08-12):
 - `cdp_list.py`, `cdp_dump.py`, `cdp_fetch.py` — dump CDP (butuh `websocket-client`; pakai venv protraderbot: `/c/Users/satri/code/protraderbot/.venv/Scripts/python.exe`)
 - `probe_pe*.py`, `probe_taubndl.py`, `probe_assets*.py`, `probe_exp.py`, `probe_extract.py`, `probe_final.py`, `probe_vite.py` — analisis PE/bundle (hasil: NSIS/Inno+UPX installer, app asli Tauri)
 - `dump/index_rendered.html` (187KB), `dump/index-BUMcGDRC.js` (1,5MB), `dump/index-CbZLwW9f.css` (131KB)
+- `mass_sl_setup.py` — **UTILITY LIVE**: pasang SL Donchian utk SEMUA holding yg belum ber-SL. `--dry-run` = rencana saja (AMAN). Profitsbot TIDAK punya reconciliation SL otomatis => ada holding "yatim" tanpa SL (insiden 08-25: 4/10); utility ini menambal. SKIP yg sudah ber-SL & yg SL-nya tembus; qty=LOT (total//100). Manual override via `MANUAL` dict.
+- `housekeep_sl_profitsbot.sh` — **UTILITY**: script housekeeping SL orphaned (dipanggil cron 16:15 workdays; mode agent + workdir repo; `python housekeep_sl.py`)
 
 ## Catatan
 - ⏰ TEST ORDER LIVE = MANUAL oleh user, pas jam pasar (09:00 WIB) — jangan auto-start/
