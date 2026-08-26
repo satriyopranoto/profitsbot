@@ -28,8 +28,7 @@ import indicators as ind
 SYMBOLS = os.environ.get("PROFITS_SYMBOLS", "BBCA,BBRI,ANTM").split(",")
 PROTRADER_API = os.environ.get("PROTRADER_API", "http://127.0.0.1:8777")  # bot protrader (real-time PMP)
 # --- chart ---
-CHART_COUNTBACK = int(os.environ.get("PROFITS_CHART_COUNTBACK", "2000"))  # max bar (best effort — Yahoo)
-SCAN_INTERVAL = os.environ.get("PROFITS_SCAN_INTERVAL", "15m")  # timeframe sinyal — SOURCE OF TRUTH utk resolution chart (res_map di fetch_ohlc)
+SCAN_INTERVAL = os.environ.get("PROFITS_SCAN_INTERVAL", "15m")  # timeframe sinyal — SOURCE OF TRUTH utk resolution chart (res_map di fetch_ohlc; countback=2000 hardcoded) 
 # --- indikator (basis ADX) ---
 ADX_PERIOD = int(os.environ.get("PROFITS_ADX_PERIOD", "14"))  # period ADX (Wilder)
 ADX_THRESHOLD = float(os.environ.get("PROFITS_ADX_THRESHOLD", "20"))  # minimal ADX utk sinyal tren

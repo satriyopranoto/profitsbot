@@ -164,10 +164,11 @@ Payload createOrder (TERVERIFIKASI LIVE 2026-08-12):
 
 ## CONFIG LENGKAP (env — analog .env protraderbot) — TERVERIFIKASI
 - CHART: TIMEFRAME sinyal dikontrol **PROFITS_SCAN_INTERVAL** (mis. `30m`; source-of-truth,
-  di-map ke resolution TradingView via `res_map` di `fetch_ohlc`). `PROFITS_CHART_RESOLUTION`
-  **SUDAH DIHAPUS 2026-08-26** (variabel nganggur — jangan dipakai lagi). PROFITS_CHART_COUNTBACK
-  (2000, best effort — sumber utama = ChartCloud POEMS via api_server /chart (147 bar/10 hari utk
-  15m); Yahoo fallback: 1m~390 bar, 15m~145 bar/5d, 1d~247 bar/1y; 3/45/120/240m → interval terdekat).
+  di-map ke resolution TradingView via `res_map` di `fetch_ohlc`). `PROFITS_CHART_RESOLUTION` &
+  `PROFITS_CHART_COUNTBACK` **SUDAH DIHAPUS 2026-08-26** (variabel nganggur — countback api_server
+  = 2000 hardcoded; jangan dipakai lagi). Sumber utama = ChartCloud POEMS via api_server /chart
+  (147 bar/10 hari utk 15m); Yahoo fallback: 1m~390 bar, 15m~145 bar/5d, 1d~247 bar/1y;
+  3/45/120/240m → interval terdekat).
 - INDIKATOR: PROFITS_ADX_PERIOD (14), PROFITS_ADX_THRESHOLD (20), PROFITS_ADX_CROSS (15),
   PROFITS_DONCHIAN_PERIOD (10 — SL lookback = 2.8x = 28 bar),
   PROFITS_BOLLINGER_PERIOD (20), PROFITS_BOLLINGER_STD (2).
