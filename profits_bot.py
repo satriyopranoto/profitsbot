@@ -28,8 +28,8 @@ import indicators as ind
 SYMBOLS = os.environ.get("PROFITS_SYMBOLS", "BBCA,BBRI,ANTM").split(",")
 PROTRADER_API = os.environ.get("PROTRADER_API", "http://127.0.0.1:8777")  # bot protrader (real-time PMP)
 # --- chart ---
-CHART_RESOLUTION = os.environ.get("PROFITS_CHART_RESOLUTION", "15")  # 1,3,5,15,30,45,60,120,240,D
 CHART_COUNTBACK = int(os.environ.get("PROFITS_CHART_COUNTBACK", "2000"))  # max bar (best effort — Yahoo)
+SCAN_INTERVAL = os.environ.get("PROFITS_SCAN_INTERVAL", "15m")  # timeframe sinyal — SOURCE OF TRUTH utk resolution chart (res_map di fetch_ohlc)
 # --- indikator (basis ADX) ---
 ADX_PERIOD = int(os.environ.get("PROFITS_ADX_PERIOD", "14"))  # period ADX (Wilder)
 ADX_THRESHOLD = float(os.environ.get("PROFITS_ADX_THRESHOLD", "20"))  # minimal ADX utk sinyal tren
@@ -55,7 +55,6 @@ TRADE_LOT = int(os.environ.get("PROFITS_TRADE_LOT", "0"))  # lot/order (0 = sizi
 TEST_SYMBOL = os.environ.get("PROFITS_TEST_SYMBOL", "").upper()  # test cycle langsung di saham ini
 USE_FLIP = os.environ.get("PROFITS_FLIP", os.environ.get("PROFITS_USE_FLIP", "1")) == "1"
 CYCLE_MINUTES = float(os.environ.get("PROFITS_CYCLE_MINUTES", "3"))  # loop scan (menit)
-SCAN_INTERVAL = os.environ.get("PROFITS_SCAN_INTERVAL", "15m")  # timeframe sinyal (Yahoo)
 AUTO_EXECUTE = (BOT_MODE == "trade")  # otomatis: nontrade = scan&log; trade = eksekusi real
 MARKET_HOURS = os.environ.get("PROFITS_MARKET_HOURS", "0") == "1"  # 0 = 24 jam (testing); 1 = cuma jam bursa
 MARKET_OPEN = os.environ.get("PROFITS_MARKET_OPEN", "09:00")  # jam pasar WIB (kalau MARKET_HOURS=1)
@@ -210,15 +209,26 @@ class ProfitsBot:
         if not items and r.get("message"):
             self._top_error = str(r.get("message"))[:120]
         rows = []
+        filt_fmt = filt_val = 0
         for it in items:
             b = it.get("buy") or {}
             code = str(b.get("code") or "")
             val = b.get("val") or 0
             if not _re.match(r"^[A-Z]{4}$", code):
-                continue  # bukan regular stocks (paritas protraderbot)
+                filt_fmt += 1  # bukan regular stock 4 huruf — buang
+                continue
             if val < MIN_TOP_VAL:
-                continue  # market dry / saham garing — skip
+                filt_val += 1  # di bawah floor likuiditas — buang
+                continue
             rows.append((val, b))
+        # Beda-kan "API kosong" vs "semua kena filter" biar diagnosa akurat
+        # (kasus 2026-08-26: top-stocks balik 50 item tapi 0 lolos karena
+        # MIN_TOP_VAL=15B di market dry -> log lama nyasar "server di-clear?").
+        if not rows and items:
+            self._top_error = (
+                f"data API ada ({len(items)} item) tapi SEMUA dikeluarkan filter: "
+                f"{filt_fmt} bukan [A-Z]{4}, {filt_val} val < MIN_TOP_VAL({MIN_TOP_VAL:.0f})"
+            )
         rows.sort(key=lambda x: x[0], reverse=True)
         return [b for _, b in rows[:n]]
 

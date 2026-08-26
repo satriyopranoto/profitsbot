@@ -163,9 +163,11 @@ Payload createOrder (TERVERIFIKASI LIVE 2026-08-12):
   -> 'Uptrend Kuat 69%' PALSU). ⚠️ api_server 8777 WAJIB jalan utk data akurat.
 
 ## CONFIG LENGKAP (env — analog .env protraderbot) — TERVERIFIKASI
-- CHART: PROFITS_CHART_RESOLUTION (15) & PROFITS_CHART_COUNTBACK (2000, best effort —
-  sumber utama = ChartCloud POEMS via api_server /chart (147 bar/10 hari utk 15m);
-  Yahoo fallback: 1m~390 bar, 15m~145 bar/5d, 1d~247 bar/1y; 3/45/120/240m → interval terdekat).
+- CHART: TIMEFRAME sinyal dikontrol **PROFITS_SCAN_INTERVAL** (mis. `30m`; source-of-truth,
+  di-map ke resolution TradingView via `res_map` di `fetch_ohlc`). `PROFITS_CHART_RESOLUTION`
+  **SUDAH DIHAPUS 2026-08-26** (variabel nganggur — jangan dipakai lagi). PROFITS_CHART_COUNTBACK
+  (2000, best effort — sumber utama = ChartCloud POEMS via api_server /chart (147 bar/10 hari utk
+  15m); Yahoo fallback: 1m~390 bar, 15m~145 bar/5d, 1d~247 bar/1y; 3/45/120/240m → interval terdekat).
 - INDIKATOR: PROFITS_ADX_PERIOD (14), PROFITS_ADX_THRESHOLD (20), PROFITS_ADX_CROSS (15),
   PROFITS_DONCHIAN_PERIOD (10 — SL lookback = 2.8x = 28 bar),
   PROFITS_BOLLINGER_PERIOD (20), PROFITS_BOLLINGER_STD (2).

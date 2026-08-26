@@ -87,8 +87,11 @@ PROFITS_TEST_SYMBOL=BBCA ./.venv/Scripts/python.exe profits_bot.py
 ## ⚙️ Config (`.env`) — analog protraderbot
 
 ```ini
-# Chart
-PROFITS_CHART_RESOLUTION=15            # timeframe: 1,3,5,15,30,45,60,120,240,D
+# Chart — TIMEFRAME sinyal dikontrol PROFITS_SCAN_INTERVAL (bawah), BUKAN
+# PROFITS_CHART_RESOLUTION (variabel itu sudah dihapus 2026-08-26 — fetch_ohlc
+# memetakan SCAN_INTERVAL ke resolution TradingView via res_map). Perubahan
+# Sama berlaku utk paritas protraderbot: CHART_RESOLUTION di protraderbot = source
+# of truth sinyal; di profitsbot = SCAN_INTERVAL yang dipakai.
 PROFITS_CHART_COUNTBACK=2000           # max bar (best effort — Yahoo)
 
 # Indikator (Basis ADX)
