@@ -563,31 +563,41 @@ class ProfitsBot:
             with urllib.request.urlopen(req, timeout=25) as resp:
                 d = json.loads(resp.read().decode())
             rows = d.get("data")
-            if isinstance(rows, list) and rows:
+            # ChartCloud dingin/sepi bisa balik JUSTRU terlalu pendek (kasus MDIA:
+            # cuma 15 bar) padahal Yahoo punya 113 bar. Data < lookback SL (28)
+            # gak cukup utk Donchian/ADX -> jangan dipakai, turun ke fallback Yahoo.
+            if isinstance(rows, list) and len(rows) >= 28:
                 return rows
         except Exception:
             pass
-        # 2) fallback Yahoo (delay)
-        url = (f"https://query1.finance.yahoo.com/v8/finance/chart/{code}.JK"
-               f"?range={range_}&interval={interval}")
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        try:
-            with urllib.request.urlopen(req, timeout=20) as resp:
-                r = json.loads(resp.read().decode())
-        except Exception as e:
-            return {"error": str(e)}
-        res = (r.get("chart", {}).get("result") or [])
-        if not res:
-            return {"error": "kosong"}
-        ts = res[0].get("timestamp") or []
-        q = (res[0].get("indicators", {}).get("quote") or [{}])[0]
-        rows = []
-        for i in range(len(ts)):
-            if q["close"][i] is None:
+        # 2) fallback Yahoo (delay) — coba range makin panjang utk saham tipis/kurang
+        #    data (kasus MDIA: 5d cuma ~15 bar close valid padahal 1mo = 260).
+        for range_opt in [range_, "1mo", "3mo", "1y"]:
+            url = (f"https://query1.finance.yahoo.com/v8/finance/chart/{code}.JK"
+                   f"?range={range_opt}&interval={interval}")
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            try:
+                with urllib.request.urlopen(req, timeout=20) as resp:
+                    r = json.loads(resp.read().decode())
+            except Exception as e:
+                if range_opt == "1y":
+                    return {"error": str(e)}
                 continue
-            rows.append({"t": ts[i], "o": q["open"][i], "h": q["high"][i],
-                         "l": q["low"][i], "c": q["close"][i], "v": q["volume"][i]})
-        return rows
+            res = (r.get("chart", {}).get("result") or [])
+            if not res:
+                if range_opt == "1y":
+                    return {"error": "kosong"}
+                continue
+            ts = res[0].get("timestamp") or []
+            q = (res[0].get("indicators", {}).get("quote") or [{}])[0]
+            rows = []
+            for i in range(len(ts)):
+                if q["close"][i] is None:
+                    continue
+                rows.append({"t": ts[i], "o": q["open"][i], "h": q["high"][i],
+                             "l": q["low"][i], "c": q["close"][i], "v": q["volume"][i]})
+            if len(rows) >= 28 or range_opt == "1y":
+                return rows
 
     def real_time_price(self, code, timeout=8):
         """Harga real-time multi-source (fallback chain):
@@ -815,6 +825,64 @@ class ProfitsBot:
         return {"code": code, "trigger": trigger,
                 "lower": round(dc["lower"]), "upper": round(dc["upper"]),
                 "lookback": lookback}
+
+    def reconcile_sl(self, dc_mult=None, dc_per=None):
+        """Auto-pasang Stop Loss utk SEMUA posisi yang belum ber-SL.
+
+        Reconciliation (insiden 2026-08-25: posisi 'yatim' tanpa SL). Persis
+        logika mass_sl_setup.py yang TERBUKTI live: SL = min(low, lookback
+        2.8x10 bar), qty = LOT (total//100), SKIP yang sudah ber-SL (tidak
+        ditimpa) & yang SL>=current (sudah tembus). Set_stop_loss cuma jalan
+        kalau self.live (kalau tidak -> DRY-RUN plan di-log).
+
+        Return (placed:list[code], missing:list[code], skipped:list[str]).
+        """
+        dc_mult = dc_mult or DONCHIAN_MULTIPLE
+        dc_per = dc_per or DONCHIAN_PERIOD
+        self.ensure_trade_token()
+        st = self.get_stocks()
+        rows = st.get("data") or []
+        qtys = {x.get("code"): max(int((x.get("total") or 0) // 100), 1)
+                for x in rows if (x.get("total") or 0) > 0}
+        sls = self.get_stop_losses()
+        sls_data = sls.get("data") or []
+        if isinstance(sls_data, dict):
+            sls_data = sls_data.get("list") or sls_data.get("items") or []
+        have_sl = {s.get("code") for s in sls_data}
+        placed, missing, skipped = [], [], []
+        for code in qtys:
+            if code in have_sl:
+                continue  # sudah ber-SL — jangan timpa
+            sl = self.sl_donchian_price(code, SCAN_INTERVAL, dc_mult, dc_per)
+            if sl is None:
+                skipped.append(f"{code}(ohlc n/a)")
+                missing.append(code)
+                self.log(f"SL reconcile {code}: OHLC n/a -> SKIP, butuh level manual")
+                continue
+            # skip kalau SL >= current (tembus -> langsung ke-trigger, sia-sia)
+            try:
+                px = self.get_price(code)
+                cur = (px or {}).get("last") or (px or {}).get("sellPrice") or \
+                      (px or {}).get("price") or 0
+            except Exception:
+                cur = 0
+            if cur and sl >= cur:
+                skipped.append(f"{code}(tembus sl{int(sl)}>=cur{int(cur)})")
+                missing.append(code)
+                self.log(f"SL reconcile {code}: SL {int(sl)} >= current {int(cur)} (tembus) -> SKIP, butuh level manual")
+                continue
+            r = self.set_stop_loss(code, int(sl), qtys[code])
+            if not self.live:
+                placed.append(code)  # DRY-RUN: rencana tercatat, tak terkirim
+                continue
+            if not (r.get("errors") or r.get("error")):
+                placed.append(code)
+                self.log(f"SL reconcile {code}: pasang trig={int(sl)} qty={qtys[code]}")
+            else:
+                skipped.append(f"{code}(err {str(r)[:80]})")
+                missing.append(code)
+                self.log(f"SL reconcile {code}: GAGAL trig={int(sl)} qty={qtys[code]}: {str(r)[:160]}")
+        return placed, missing, skipped
 
     def execute_signals(self, results, min_score=1, live=False):
         """Eksekusi sinyal -> order (DRY-RUN default; live hanya dgn flag).
@@ -1092,6 +1160,16 @@ def run_loop(bot, cycle_minutes=CYCLE_MINUTES, interval=SCAN_INTERVAL,
                                 f"SELL {p['symbol']} {p['qty_lot']}lot @{p['price']}" for p in plans))
             except Exception as e:
                 bot.log(f"exit check error: {e}")
+            # RECONCILE SL — auto-pasang SL utk posisi yang masih belum ber-SL
+            # (biar tak ada holding 'yatim'. skip yg sudah ber-SL & yg SL>=current)
+            if auto_execute:
+                try:
+                    placed, missing, skipped = bot.reconcile_sl()
+                    if placed or missing:
+                        bot.log(f"RECONCILE SL: placed={placed} "
+                                f"missing={missing} skipped={skipped}")
+                except Exception as e:
+                    bot.log(f"reconcile sl error: {e}")
             if not new_sig:
                 bot.log(f"scan ok ({len(res)} saham, tidak ada sinyal baru)")
         except Exception as e:
