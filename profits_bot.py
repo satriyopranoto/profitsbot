@@ -696,8 +696,11 @@ class ProfitsBot:
         rsi = ind.rsi(close, 14)
         sma20 = ind.sma(close, 20)
         close_last = close[-1]
-        # statistic bullish ala stocktrade: % bar ADX>25 & Close>SMA20 (window 100)
-        adx_pct, adx_comment = ind.adx_sma_pct(s, close, ind.sma_series(close, 20))
+        # statistic bullish ala stocktrade: % bar ADX>adx_thresh & Close>SMA20 (window 100).
+        # WAJIB adx_min = ADX_THRESHOLD config (bukan default 25) — selaraskan dgn sinyal
+        # biar gate UPTREND_MIN_PCT konsisten. (paritas fix protraderbot c04d7e7, kasus JAST.)
+        adx_pct, adx_comment = ind.adx_sma_pct(s, close, ind.sma_series(close, 20),
+                                               adx_min=adx_thresh)
 
         # filter DISCRETE: % bar flat (close == prev close) > MAX_FLAT_PCT -> skip
         flat_pct = 0.0
