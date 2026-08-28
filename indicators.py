@@ -103,7 +103,8 @@ def sma_series(vals, n):
 def adx_sma_pct(adx_series_list, close, sma20_list, window=100, adx_min=25):
     """Statistic bullish ala stocktrade: % bar dengan ADX>adx_min & Close>SMA20.
 
-    Window bar terakhir (default 100, mulai bar 20). Return (pct, commentary).
+    Window bar terakhir (default 100, mulai bar 20). Return (pct, commentary, valid)
+    — valid = jumlah bar yang benar2 dievaluasi (utk guard data pendek).
     Commentary: >=35 'Uptrend Kuat', >=30 'Medium Uptrend', else 'Sideways'.
     """
     valid = bull = 0
@@ -119,10 +120,10 @@ def adx_sma_pct(adx_series_list, close, sma20_list, window=100, adx_min=25):
             bull += 1
     pct = round(100.0 * bull / valid, 1) if valid else 0.0
     if pct >= 35:
-        return pct, f"Uptrend Kuat ({pct:.0f}%)"
+        return pct, f"Uptrend Kuat ({pct:.0f}%)", valid
     if pct >= 30:
-        return pct, f"Medium Uptrend ({pct:.0f}%)"
-    return pct, f"Sideways ({pct:.0f}%)"
+        return pct, f"Medium Uptrend ({pct:.0f}%)", valid
+    return pct, f"Sideways ({pct:.0f}%)", valid
 
 
 def donchian(vals, n=20):

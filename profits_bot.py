@@ -66,6 +66,10 @@ SL_DONCHIAN_PERIOD = int(os.environ.get("PROFITS_SL_DONCHIAN_PERIOD", str(DONCHI
 FLIP = USE_FLIP
 BUY_UPTREND_ONLY = os.environ.get("PROFITS_BUY_UPTREND_ONLY", "1") == "1"  # buy HANYA uptrend kuat
 UPTREND_MIN_PCT = float(os.environ.get("PROFITS_UPTREND_MIN_PCT", "35"))  # ambang adx_sma_pct
+# Guard statistic bullish "last N bar" utk hindari pct palsu-tinggi saat OHLC pendek
+# (kasus VKTR 2026-08-27: window ~30-40 bar of rally -> adx_sma_pct 100% padahal sideways).
+ADX_PCT_WINDOW = int(os.environ.get("PROFITS_ADX_PCT_WINDOW", "100"))  # jendela statistik (bar)
+ADX_PCT_MIN_BARS = int(os.environ.get("PROFITS_ADX_PCT_MIN_BARS", "60"))  # min bar valid utk dipercaya
 TP_PCT = float(os.environ.get("PROFITS_TP_PCT", "0.5"))  # exit check: floating profit > %
 LOT_SIZE = 100  # 1 lot = 100 lembar
 MAINT_WINDOW = (22 * 60, 5)  # 22:00-00:05 WIB (server maintenance)
@@ -544,11 +548,13 @@ class ProfitsBot:
                 pass
 
     # ---- siklus ----
-    def fetch_ohlc(self, code, interval="15m", range_="5d"):
+    def fetch_ohlc(self, code, interval="15m", range_="5d", min_bars=0):
         """OHLC multi-source (fallback chain):
 
         1. Bot protrader API lokal (/chart/<CODE>) — OHLC ChartCloud POEMS real-time
         2. Yahoo Finance .JK (delay ~10 menit) — kalau bot protrader mati
+        min_bars: utk scanning (adx_sma_pct 'last N bar') minta history cukup — kalau
+        tidak, statistic bisa dihitung dari jendela pendek & melonjak (kasus VKTR).
         Return list dict {t: epoch, o,h,l,c, v} urut waktu / {error: ...}.
         """
         import urllib.request, urllib.error
@@ -566,7 +572,8 @@ class ProfitsBot:
             # ChartCloud dingin/sepi bisa balik JUSTRU terlalu pendek (kasus MDIA:
             # cuma 15 bar) padahal Yahoo punya 113 bar. Data < lookback SL (28)
             # gak cukup utk Donchian/ADX -> jangan dipakai, turun ke fallback Yahoo.
-            if isinstance(rows, list) and len(rows) >= 28:
+            # Kalau min_bars diset (scan), butuh bar sebanyak itu biar statistic valid.
+            if isinstance(rows, list) and len(rows) >= max(28, min_bars):
                 return rows
         except Exception:
             pass
@@ -596,7 +603,7 @@ class ProfitsBot:
                     continue
                 rows.append({"t": ts[i], "o": q["open"][i], "h": q["high"][i],
                              "l": q["low"][i], "c": q["close"][i], "v": q["volume"][i]})
-            if len(rows) >= 28 or range_opt == "1y":
+            if len(rows) >= max(28, min_bars) or range_opt == "1y":
                 return rows
 
     def real_time_price(self, code, timeout=8):
@@ -688,7 +695,7 @@ class ProfitsBot:
         adx_n = adx_n or ADX_PERIOD
         adx_thresh = ADX_THRESHOLD
         adx_cross = ADX_CROSS
-        ohlc = self.fetch_ohlc(code, interval, range_)
+        ohlc = self.fetch_ohlc(code, interval, range_, min_bars=ADX_PCT_WINDOW)
         if isinstance(ohlc, dict):
             return {"code": code, "action": "HOLD", "score": 0,
                     "reasons": [f"data gagal: {ohlc.get('error')}"]}
@@ -709,8 +716,14 @@ class ProfitsBot:
         # statistic bullish ala stocktrade: % bar ADX>adx_thresh & Close>SMA20 (window 100).
         # WAJIB adx_min = ADX_THRESHOLD config (bukan default 25) — selaraskan dgn sinyal
         # biar gate UPTREND_MIN_PCT konsisten. (paritas fix protraderbot c04d7e7, kasus JAST.)
-        adx_pct, adx_comment = ind.adx_sma_pct(s, close, ind.sma_series(close, 20),
-                                               adx_min=adx_thresh)
+        adx_pct, adx_comment, adx_valid = ind.adx_sma_pct(s, close, ind.sma_series(close, 20),
+                                                  adx_min=adx_thresh)
+        # Guard data pendek (kasus VKTR 2026-08-27): kalau bar valid < ADX_PCT_MIN_BARS,
+        # statistik "last N bar" cuma diproses dari jendela kecil (isi rally) -> pct
+        # palsu-tinggi (100%) padahal bukan uptrend kuat. Null-kan pct -> gate SKIP.
+        if adx_valid < ADX_PCT_MIN_BARS:
+            adx_pct = 0.0
+            adx_comment = f"Data kurang ({adx_valid} bar<{ADX_PCT_MIN_BARS}) — statistik tdk dipercaya"
 
         # filter DISCRETE: % bar flat (close == prev close) > MAX_FLAT_PCT -> skip
         flat_pct = 0.0
