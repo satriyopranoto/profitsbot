@@ -48,6 +48,12 @@ MIN_TOP_VAL = int(os.environ.get("PROFITS_MIN_TOP_VAL", "15000000000"))
 MIN_PRICE = int(os.environ.get("PROFITS_MIN_PRICE", "0"))
 FILTER_DISCRETE = os.environ.get("PROFITS_FILTER_DISCRETE", "1") == "1"  # skip saham flat
 MAX_FLAT_PCT = float(os.environ.get("PROFITS_MAX_FLAT_PCT", "50"))  # threshold flat %
+# --- RSI filter (paritas EA Basis_ADX_RSI & protraderbot) ---
+# USE_RSI_FILTER=1: BUY long HANYA kalau RSI > RSI_BUY_MIN (default 70),
+# SHORT/FLIP HANYA kalau RSI < RSI_SELL_MAX (default 30). Anti-sideway.
+USE_RSI_FILTER = os.environ.get("PROFITS_USE_RSI_FILTER", "0") == "1"
+RSI_BUY_MIN = float(os.environ.get("PROFITS_RSI_BUY_MIN", "70"))
+RSI_SELL_MAX = float(os.environ.get("PROFITS_RSI_SELL_MAX", "30"))
 # --- mode & eksekusi ---
 BOT_MODE = os.environ.get("PROFITS_BOT_MODE", "nontrade").lower()  # nontrade|trade
 TRADE_LOT = int(os.environ.get("PROFITS_TRADE_LOT", "0"))  # lot/order (0 = sizing CAPITAL/RISK)
@@ -755,18 +761,22 @@ class ProfitsBot:
         if i >= 6 and s6 and sl_lower is not None and sma20 is not None:
             if (low[i] > sl_lower and close[i] > sma20
                     and last["adx"] > adx_thresh and last["adx"] > s6["adx"]
-                    and last["pdi"] > last["mdi"] and last["pdi"] > s6["pdi"]):
+                    and last["pdi"] > last["mdi"] and last["pdi"] > s6["pdi"]
+                    and (rsi is None or not USE_RSI_FILTER or rsi > RSI_BUY_MIN)):
                 action, score = "BUY", 1
                 reasons.append(
                     f"BUY: low {low[i]:.0f}>SL {sl_lower:.0f}, close {close[i]:.0f}>SMA20 {sma20:.0f}, "
-                    f"ADX {last['adx']:.1f}>{adx_thresh:.0f} & naik, +DI {last['pdi']:.1f}>-DI {last['mdi']:.1f} & naik")
+                    f"ADX {last['adx']:.1f}>{adx_thresh:.0f} & naik, +DI {last['pdi']:.1f}>-DI {last['mdi']:.1f} & naik"
+                    + (f", RSI {rsi:.0f}>{RSI_BUY_MIN:.0f}" if (USE_RSI_FILTER and rsi is not None) else ""))
             elif (high[i] < sl_lower and close[i] < sma20
                     and last["adx"] > adx_thresh and last["adx"] > s6["adx"]
-                    and last["mdi"] > last["pdi"] and last["mdi"] > s6["mdi"]):
+                    and last["mdi"] > last["pdi"] and last["mdi"] > s6["mdi"]
+                    and (rsi is None or not USE_RSI_FILTER or rsi < RSI_SELL_MAX)):
                 action, score = "SHORT", 1
                 reasons.append(
                     f"SHORT: high {high[i]:.0f}<SL {sl_lower:.0f}, close {close[i]:.0f}<SMA20 {sma20:.0f}, "
-                    f"ADX {last['adx']:.1f}>{adx_thresh:.0f} & naik, -DI {last['mdi']:.1f}>+DI {last['pdi']:.1f} & naik")
+                    f"ADX {last['adx']:.1f}>{adx_thresh:.0f} & naik, -DI {last['mdi']:.1f}>+DI {last['pdi']:.1f} & naik"
+                    + (f", RSI {rsi:.0f}<{RSI_SELL_MAX:.0f}" if (USE_RSI_FILTER and rsi is not None) else ""))
         if action == "HOLD" and not reasons:
             reasons.append(f"ADX {last['adx']} +DI {last['pdi']} -DI {last['mdi']} RSI {rsi:.0f}")
         return {"code": code, "action": action, "score": score,
@@ -1285,6 +1295,8 @@ def _main(args):
     bot.trade_login()
     if MIN_PRICE > 0:
         print(f"[{time.strftime('%H:%M:%S')}] [FILTER] MIN_PRICE={MIN_PRICE} aktif — HANYA beli saham harga >= {MIN_PRICE} (jual/exit bebas filter)")
+    if USE_RSI_FILTER:
+        print(f"[{time.strftime('%H:%M:%S')}] [FILTER] USE_RSI_FILTER=1 aktif — BUY long HANYA RSI>{RSI_BUY_MIN:.0f}, SHORT/FLIP HANYA RSI<{RSI_SELL_MAX:.0f} (paritas EA Basis_ADX_RSI)")
     if live:
         print(f"[{time.strftime('%H:%M:%S')}] !! TRADE MODE — order akan dikirim beneran !!")
     else:
