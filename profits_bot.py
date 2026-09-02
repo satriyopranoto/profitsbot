@@ -223,19 +223,40 @@ class ProfitsBot:
         self._top_error = ""
         if not items and r.get("message"):
             self._top_error = str(r.get("message"))[:120]
+        # DIAGNOSTIK: tampilkan RAW top-stocks SEBELUM filter (biar kelihatan isi &
+        # unit tiap field, mis. val vs vol) — utk cek kenapa scan cuma dapet sedikit.
+        try:
+            self.log(f"[TOP-VALUES] RAW {len(items)} item (sebelum filter):")
+            for _k, _it in enumerate(items[:20], 1):
+                self.log(f"  {_k:3}. {_it.get('buy') or _it}")
+            if len(items) > 20:
+                self.log(f"  ... dan {len(items)-20} item lagi")
+        except Exception as _e:
+            self.log(f"[TOP-VALUES] diagnostik gagal: {_e}")
         rows = []
         filt_fmt = filt_val = 0
         for it in items:
-            b = it.get("buy") or {}
-            code = str(b.get("code") or "")
-            val = b.get("val") or 0
-            if not _re.match(r"^[A-Z]{4}$", code):
-                filt_fmt += 1  # bukan regular stock 4 huruf — buang
-                continue
-            if val < MIN_TOP_VAL:
-                filt_val += 1  # di bawah floor likuiditas — buang
-                continue
-            rows.append((val, b))
+            for _side in ("buy", "sell"):
+                b = it.get(_side) or {}
+                code = str(b.get("code") or "")
+                if not code:
+                    continue
+                if not _re.match(r"^[A-Z]{4}$", code):
+                    filt_fmt += 1  # bukan regular stock 4 huruf — buang
+                    continue
+                val = b.get("val") or 0
+                if val < MIN_TOP_VAL:
+                    filt_val += 1  # di bawah floor likuiditas — buang
+                    continue
+                rows.append((val, b))
+        # dedup per saham: satu saham bisa muncul di sisi buy & sell — nilai transaksi
+        # itu SAMA (matched, bukan dijumlah), jadi ambil val MAX per kode.
+        _best = {}
+        for _val, _b in rows:
+            _c = str(_b.get("code"))
+            if _c not in _best or _val > _best[_c][0]:
+                _best[_c] = (_val, _b)
+        rows = list(_best.values())
         # Beda-kan "API kosong" vs "semua kena filter" biar diagnosa akurat
         # (kasus 2026-08-26: top-stocks balik 50 item tapi 0 lolos karena
         # MIN_TOP_VAL=15B di market dry -> log lama nyasar "server di-clear?").
