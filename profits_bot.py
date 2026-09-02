@@ -284,7 +284,8 @@ class ProfitsBot:
 
         SELL jika: floating_pct > tp_pct  AND  close < sl (Donchian).
         - floating_pct = (current - avg) / avg * 100   (avg dari holding)
-        - sl = Donchian SL terbaru (LLV utk long, HHV utk short — high/low asli)
+        - sl = SWITCH SL (ac==1?s:r, SL paritas protraderbot) saat PROFITS_SWITCH_SL=1
+          => di regime DOWN sl = band ATAS, exit TP lebih awal; legacy (0) = LLV (min low).
         Jadi profit > 0,5% BELUM dijual — baru jual kalau close balik tembus
         SL Donchian (trailing trigger). BUKAN jual langsung di +0,5%!
         """
@@ -301,8 +302,11 @@ class ProfitsBot:
             flat_pct = (cur - avg) / avg * 100
             if flat_pct <= tp_pct:
                 continue  # syarat 1: floating > tp_pct
-            # syarat 2 (AND): close < SL DONCHIAN (trailing trigger)
-            sl = self.sl_donchian_price(r["code"], SCAN_INTERVAL, dc_mult, dc_per)
+            # syarat 2 (AND): close < SL DONCHIAN (trailing trigger).
+            # Switch SL (paritas protraderbot) saat aktif, else LLV legacy.
+            sl = (self.sl_donchian_switch(r["code"], SCAN_INTERVAL, dc_mult, dc_per)
+                  if PROFITS_SWITCH_SL
+                  else self.sl_donchian_price(r["code"], SCAN_INTERVAL, dc_mult, dc_per))
             if sl is None:
                 continue  # SL n/a -> jangan jual (fail-safe)
             if cur >= sl:
@@ -327,6 +331,23 @@ class ProfitsBot:
         if not lows or any(x is None for x in lows):
             return None
         return min(lows)
+
+    def sl_donchian_switch(self, code, interval="15m", dc_mult=2.8, dc_per=10):
+        """SL SWITCH utk EXIT/TP-trailing (paritas protraderbot check_exit donchian_sl).
+
+        sl = ac==1 ? s(lowest low) : r(highest high); ac = arah Donchian-breakout
+        terakhir (ffill). Saat regime DOWN (ac=-1) sl = band ATAS => close < sl mudah
+        => exit TP lebih awal (paritas protraderbot). Return float / None kalau data
+        kurang. HANYA utk jalur exit; pasang SL order tetap pakai sl_donchian_price (LLV).
+        """
+        guard = max(int(dc_mult * dc_per), 5)
+        ohlc = self.fetch_ohlc(code, interval, "5d")
+        if isinstance(ohlc, dict) or not ohlc or len(ohlc) < guard:
+            return None
+        hi = [x["h"] for x in ohlc]
+        lo = [x["l"] for x in ohlc]
+        sl_arr = ind.donchian_sl_switch(hi, lo, dc_mult, dc_per)
+        return sl_arr[-1] if sl_arr else None
 
     def basis_price(self, code, interval="15m", basis_period=20):
         """Basis = SMA20 close terakhir (paritas EA TPBasis / protraderbot).
