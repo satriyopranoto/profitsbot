@@ -222,7 +222,11 @@ Payload createOrder (TERVERIFIKASI LIVE 2026-08-12):
       `sl_donchian_switch` (paritas protraderbot donchian_sl) saat PROFITS_SWITCH_SL=1 → di
       regime DOWN sl = band ATAS → exit TP lebih awal; kalau PROFITS_SWITCH_SL=0 → LLV legacy.
       ⚠️ **Pasang SL ORDER tidak ikut switch** — `sl_donchian_price` (LLV) tetap dipakai utk
-      SL-install (mass_sl_setup, set_stop_losses) karena stop harus DI BAWAH untuk long.
+            SL-install (mass_sl_setup, set_stop_losses) karena stop harus DI BAWAH untuk long.
+        **Prinsip SL (keputusan user, 2026-09-02):** SL-install utk LONG SELALU band bawah (LLV /
+        Donchian lower) — saat buy (regime UP, `low>sl`) SL pasti DI BAWAH harga → stop valid & aktif.
+        Switch SL HANYA utk deteksi sinyal & exit (signal/check_exit), BUKAN utk memasang SL. Kalau SL
+        switch DI ATAS harga saat mau pasang = tanda buy TELAT / sudah berbalik → manual intervention.
 - `scan_signals(codes=None)` — default scan TOP VALUES 15 (top-stocks, fallback SYMBOLS) — ~2s/15 saham;
   ranking persis stocktrade: sort (rekomendasi BUY3/SHORT2, adx_sma_pct, value) desc — TIDAK memfilter.
 - `execute_signals(results, min_score=1, live=False)` — BUY: syarat uptrend kuat (adx_sma_pct>=35,
