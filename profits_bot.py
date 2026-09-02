@@ -880,6 +880,19 @@ class ProfitsBot:
             except Exception as e:
                 results.append({"code": c, "action": "HOLD", "score": 0,
                                 "reasons": [f"err: {e}"], "value": values.get(c, 0)})
+        # Buang baris watchlist yang TIDAK layak jadi signal (bukan mover tradeable):
+        #  - error data (ind kosong — mis. SMMA HTTP 422 di chart)
+        #  - DISCRETE flat (harga mati/tak bergerak — mis. GOTO 100% bar flat)
+        #  Paritas UI: saham spt itu TIDAK muncul di "Top Value" movers.
+        kept, dropped = [], []
+        for _r in results:
+            _rs = _r.get("reasons") or []
+            _bad = ("ind" not in _r) or (_rs and str(_rs[0]).startswith("DISCRETE"))
+            (kept if not _bad else dropped).append(_r)
+        if dropped:
+            self.log("[SCAN] skip tak-layak: " + ", ".join(
+                f"{_r.get('code')}:{(_r.get('reasons') or [''])[0][:45]}" for _r in dropped))
+        results = kept
         # Filter harga minimum (opsional): tandai BUY harga < MIN_PRICE utk
         # ditampilkan SKIP-PRICE di listing scan (tidak ikut dibeli). Berlaku
         # HANYA utk beli — SHORT (exit long) & TP tetap jalan tanpa filter.

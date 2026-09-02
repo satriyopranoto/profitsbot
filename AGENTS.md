@@ -239,8 +239,12 @@ Payload createOrder (TERVERIFIKASI LIVE 2026-08-12):
     BUKAN feed UI). Keduanya berstruktur `{buy,sell}` pasangan; `top_values()` MERGE
     KEDUA sisi, dedup per saham ambil val MAX (nilai transaksi matched buy=sell, BUKAN
     dijumlah). `PROFITS_TOP_SOURCE=analytics|tradebook` utk paksa sumber.
-    `PROFITS_MIN_TOP_VAL` disetel 50B (skala analitik ~= PMP) -> ~30 saham.
-    ranking persis stocktrade: sort (rekomendasi BUY3/SHORT2, adx_sma_pct, value) desc — TIDAK memfilter.
+      `PROFITS_MIN_TOP_VAL` disetel 50B (skala analitik ~= PMP) -> ~30 saham.
+      **Buang tak-layak (2026-09-02):** scan_signals skip baris yg tak bisa di-signal
+      (error data/ind kosong — mis. SMMA HTTP 422) & DISCRETE flat (harga mati — mis.
+      GOTO 100% bar flat) -> watchlist bersih hanya mover tradeable (paritas UI; SMMA/GOTO
+      tidak muncul di "Top Value" movers).
+      ranking persis stocktrade: sort (rekomendasi BUY3/SHORT2, adx_sma_pct, value) desc — TIDAK memfilter.
 - `execute_signals(results, min_score=1, live=False)` — BUY: syarat uptrend kuat (adx_sma_pct>=35,
   default) + skip kalau sudah punya posisi (anti-numpuk), harga = BEST ASK (order-book, fallback last),
   GUARD AKUMULASI cash (total plan <= cash) + PARTIAL SIZING: kalau sizing
