@@ -218,19 +218,31 @@ class ProfitsBot:
           - MIN_VAL: skip kalau val < MIN_TOP_VAL (anti saham garing saat market dry)
         """
         import re as _re
-        r = pc._req("GET", "/trade-book/trade-book/top-stocks", token=self.ensure_token())
-        items = r.get("data") or []
-        self._top_error = ""
-        if not items and r.get("message"):
-            self._top_error = str(r.get("message"))[:120]
-        # DIAGNOSTIK: tampilkan RAW top-stocks SEBELUM filter (biar kelihatan isi &
-        # unit tiap field, mis. val vs vol) — utk cek kenapa scan cuma dapet sedikit.
+        src = (os.environ.get("PROFITS_TOP_SOURCE", "analytics") or "analytics").strip().lower()
+        # PRIMARY: market-info realtime (skala benar ~100-340B, sumber UI "Top Value").
+        # FALLBACK: /trade-book/trade-book/top-stocks (lama, val ~5x lebih kecil).
+        _paths = (["/analytics/broker/v2/top-stocks?type=top-value",
+                   "/trade-book/trade-book/top-stocks"] if src != "tradebook"
+                  else ["/trade-book/trade-book/top-stocks"])
+        items, used = [], ""
+        for _p in _paths:
+            try:
+                _r = pc._req("GET", _p, token=self.ensure_token())
+                _d = (_r.get("data") or []) if isinstance(_r, dict) else []
+                if _d:
+                    items, used = _d, _p
+                    break
+                if _r.get("message"):
+                    self._top_error = str(_r.get("message"))[:120]
+            except Exception as _e:
+                self._top_error = str(_e)[:120]
+        # DIAGNOSTIK: tampilkan RAW SEBELUM filter (biar kelihatan isi/unit & urutan)
         try:
-            self.log(f"[TOP-VALUES] RAW {len(items)} item (sebelum filter):")
-            for _k, _it in enumerate(items[:20], 1):
-                self.log(f"  {_k:3}. {_it.get('buy') or _it}")
-            if len(items) > 20:
-                self.log(f"  ... dan {len(items)-20} item lagi")
+            self.log(f"[TOP-VALUES] RAW {len(items)} item dari {used or 'KOSONG'} (sebelum filter):")
+            for _k, _it in enumerate(items[:15], 1):
+                self.log(f"  {_k:3}. buy={_it.get('buy')} sell={_it.get('sell')}")
+            if len(items) > 15:
+                self.log(f"  ... dan {len(items)-15} item lagi")
         except Exception as _e:
             self.log(f"[TOP-VALUES] diagnostik gagal: {_e}")
         rows = []

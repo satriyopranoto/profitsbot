@@ -230,14 +230,16 @@ Payload createOrder (TERVERIFIKASI LIVE 2026-08-12):
 - `scan_signals(codes=None)` — default scan TOP VALUES 15 (top-stocks, fallback SYMBOLS) — ~2s/15 saham;
   **transparansi scanner (2026-09-02)**: cetak sumber + daftar watchlist yg di-scan
   (`[SCAN] watchlist <N> saham dari top-stocks(Profits)/SYMBOLS fallback: CODE:V.B ...`)
-  → bukti scan dari top-values, bukan "thin air". (Kalau N kecil, itu karena data
-    `trade-book/top-stocks` Profits tipis di luar jam pasar — di-clear 08:00 WIB.)
-    **⚠️ MERGE buy+sell + floor (2026-09-02):** endpoint `/top-stocks` memberi 50 item
-    berisi PAIR `{buy, sell}` (sisi terpisah); `top_values()` kini baca KEDUA sisi
-    (dedup per saham ambil val MAX — nilai transaksi matched, BUKAN dijumlah), bukan
-    cuma `buy` (sebelumnya mover besar BBRI/CUAN/BMRI yg di sisi `sell` terlewat →
-    scan cuma 1 dgn MIN_TOP_VAL=50B). Catatan: val API ~5x lebih kecil dari PMP/UI
-    (bedadefinisi feed), & `MIN_TOP_VAL` disetel 15B utk ~30 saham.
+  → bukti scan dari top-values, bukan "thin air". (Kalau N kecil, itu karena sumber
+    top-stocks tipis/kosong di luar jam pasar.)
+    **⚠️ SUMBER TOP-VALUE = market-info Profits (2026-09-02):** `top_values()` kini
+    pakai **PRIMARY `/analytics/broker/v2/top-stocks?type=top-value`** (sumber UI "Top
+    Value" — skala benar ~100-340B, realtime, item ber `isBuy/val/vol/freq`), FALLBACK
+    `/trade-book/trade-book/top-stocks` (lama, val ~5x lebih kecil & urutan beda — itu
+    BUKAN feed UI). Keduanya berstruktur `{buy,sell}` pasangan; `top_values()` MERGE
+    KEDUA sisi, dedup per saham ambil val MAX (nilai transaksi matched buy=sell, BUKAN
+    dijumlah). `PROFITS_TOP_SOURCE=analytics|tradebook` utk paksa sumber.
+    `PROFITS_MIN_TOP_VAL` disetel 50B (skala analitik ~= PMP) -> ~30 saham.
     ranking persis stocktrade: sort (rekomendasi BUY3/SHORT2, adx_sma_pct, value) desc — TIDAK memfilter.
 - `execute_signals(results, min_score=1, live=False)` — BUY: syarat uptrend kuat (adx_sma_pct>=35,
   default) + skip kalau sudah punya posisi (anti-numpuk), harga = BEST ASK (order-book, fallback last),
