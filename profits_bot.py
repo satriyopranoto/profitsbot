@@ -824,14 +824,20 @@ class ProfitsBot:
         """
         import urllib.request, urllib.error
         values = {}
+        src = "inline"
         if codes is None:
-            tv = self.top_values(TOP_VALUES)
+            tv = self.top_values(TOP_VALUES) or []
             codes = [b["code"] for b in tv] or SYMBOLS
             values = {b["code"]: b.get("val", 0) for b in tv}
+            src = "top-stocks(Profits)" if tv else "SYMBOLS fallback"
             if not tv and not getattr(self, "_fb_warned", False):
                 self._fb_warned = True
                 why = getattr(self, "_top_error", "") or "data kosong (server di-clear?)"
-                self.log(f"top-stocks kosong/gagal ({why}) — fallback ke SYMBOLS: {codes}")
+                self.log(f"top-stocks kosong/gagal ({why}) — fallback ke SYMBOLS")
+        # transparansi scanner ala protraderbot: tampilkan SUMBER + daftar watchlist
+        # yang di-scan, biar jelas scan dari top-values (bukan "dari thin air").
+        self.log(f"[SCAN] watchlist {len(codes)} saham dari {src}")
+        self.log("  " + " ".join(f"{c}:{values.get(c, 0)/1e9:.1f}B" for c in codes))
         results = []
         for c in codes:
             try:

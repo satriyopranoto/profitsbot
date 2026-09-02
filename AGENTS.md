@@ -228,6 +228,10 @@ Payload createOrder (TERVERIFIKASI LIVE 2026-08-12):
         Switch SL HANYA utk deteksi sinyal & exit (signal/check_exit), BUKAN utk memasang SL. Kalau SL
         switch DI ATAS harga saat mau pasang = tanda buy TELAT / sudah berbalik → manual intervention.
 - `scan_signals(codes=None)` — default scan TOP VALUES 15 (top-stocks, fallback SYMBOLS) — ~2s/15 saham;
+  **transparansi scanner (2026-09-02)**: cetak sumber + daftar watchlist yg di-scan
+  (`[SCAN] watchlist <N> saham dari top-stocks(Profits)/SYMBOLS fallback: CODE:V.B ...`)
+  → bukti scan dari top-values, bukan "thin air". (Kalau N kecil, itu karena data
+  `trade-book/top-stocks` Profits tipis di luar jam pasar — di-clear 08:00 WIB.)
   ranking persis stocktrade: sort (rekomendasi BUY3/SHORT2, adx_sma_pct, value) desc — TIDAK memfilter.
 - `execute_signals(results, min_score=1, live=False)` — BUY: syarat uptrend kuat (adx_sma_pct>=35,
   default) + skip kalau sudah punya posisi (anti-numpuk), harga = BEST ASK (order-book, fallback last),
