@@ -209,6 +209,15 @@ Payload createOrder (TERVERIFIKASI LIVE 2026-08-12):
          & +DI>-DI & +DI naik(5)   [strict >, bukan cross, bukan >=]
   SHORT = high<SL & close<SMA20 & ADX>ADX_THRESHOLD & ADX naik(5)
          & -DI>+DI & -DI naik(5)   [sinyal bearish = pemicu EXIT LONG — IDX cash ga bisa short]
+- **⚡ SWITCH SL (2026-09-02, paritas EA/protraderbot/usbot)** — SL di `signal()`
+  memakai **switch** (`sl = ac==1 ? s : r`, `indicators.donchian_sl_switch`), ac = arah
+  Donchian-breakout terakhir (ffill). Saat regime DOWN (ac=-1) `sl` = **band ATAS** →
+  `high<sl` mudah → sinyal SHORT/FLIP **lebih awal**. Flip TETAP HANYA kalau rumus short
+  PENUH terpenuhi (bukan semata regime change). **Ini fix propagasi error**: profitsbot
+  dulu jadi acuan usbot yang ikut kena bug `sl` lower-fixed (usbot sudah di-fix dulu);
+  sekarang profitsbot di-paritas-kan. Toggle `PROFITS_SWITCH_SL` (default 1 = selalu switch).
+  Verifikasi (read-only): ANTM & INCO kini SHORT (sl=band-atas) yg sebelumnya HOLD; BBCA
+  tetap BUY dgn SL lebi rapat (low-band). Profitsbot baca config saat START → restart wajib.
 - `scan_signals(codes=None)` — default scan TOP VALUES 15 (top-stocks, fallback SYMBOLS) — ~2s/15 saham;
   ranking persis stocktrade: sort (rekomendasi BUY3/SHORT2, adx_sma_pct, value) desc — TIDAK memfilter.
 - `execute_signals(results, min_score=1, live=False)` — BUY: syarat uptrend kuat (adx_sma_pct>=35,

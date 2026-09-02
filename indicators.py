@@ -134,6 +134,46 @@ def donchian(vals, n=20):
     return {"upper": max(window), "lower": min(window), "middle": (max(window) + min(window)) / 2}
 
 
+def donchian_sl_switch(high, low, atr_multiple=2.8, atr_period=10):
+    """SL Switch paritas EA DonchianSL / protraderbot donchian_sl / usbot switch_sl_series.
+
+    r[i] = highest(high, ero) ; s[i] = lowest(low, ero) atas bar berakhir di i
+    (ero = atr_multiple * atr_period). ac = arah Donchian-breakout TERAKHIR
+    (ffill left-to-right): high[i] > r_prev[i] -> 1 ; low[i] < s_prev[i] -> -1.
+    sl[i] = s[i] jika ac==1 (regime UP) else r[i] (regime DOWN).
+
+    Di regime DOWN (ac=-1) sl = band ATAS (resistance) -> high<sl mudah ->
+    sinyal SHORT/FLIP lebih awal (paritas EA). Flip tetap HANYA kalau rumus short
+    penuh terpenuhi (bukan semata regime change). Return list sl (float).
+    """
+    n = len(high)
+    if n == 0:
+        return []
+    ero = max(int(atr_multiple * atr_period), 5)
+    r_curr = [0.0] * n
+    s_curr = [0.0] * n
+    r_prev = [None] * n
+    s_prev = [None] * n
+    for i in range(n):
+        lo = max(0, i - ero + 1)
+        r_curr[i] = max(high[lo:i + 1])
+        s_curr[i] = min(low[lo:i + 1])
+        if i > 0:
+            lo2 = max(0, i - ero)
+            r_prev[i] = max(high[lo2:i])
+            s_prev[i] = min(low[lo2:i])
+    ac = 0
+    sl = [0.0] * n
+    for i in range(n):
+        if i > 0 and r_prev[i] is not None:
+            if high[i] > r_prev[i]:
+                ac = 1
+            elif low[i] < s_prev[i]:
+                ac = -1
+        sl[i] = s_curr[i] if ac == 1 else r_curr[i]
+    return sl
+
+
 def atr_approx(vals, n=14):
     """ATR approksimasi dari |close[i]-close[i-1]| (tanpa high/low asli)."""
     if len(vals) < n + 1:

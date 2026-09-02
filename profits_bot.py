@@ -35,6 +35,12 @@ ADX_THRESHOLD = float(os.environ.get("PROFITS_ADX_THRESHOLD", "20"))  # minimal 
 ADX_CROSS = float(os.environ.get("PROFITS_ADX_CROSS", "15"))  # ADX min utk deteksi cross
 DONCHIAN_PERIOD = int(os.environ.get("PROFITS_DONCHIAN_PERIOD", "10"))  # SL lookback = 2.8x period
 DONCHIAN_MULTIPLE = float(os.environ.get("PROFITS_DONCHIAN_MULTIPLE", "2.8"))  # SL multiple
+# Switch SL (paritas EA/protraderbot/usbot): sl = ac==1 ? s(low) : r(high). Saat regime
+# DOWN (ac=-1) sl = band ATAS => high<sl mudah -> sinyal SHORT/FLIP lebih awal. Flip
+# tetap HANYA kalau rumus short PENUH terpenuhi (bukan semata regime change).
+# 1 = selalu switch (default); 0 = legacy (Donchian lower dari close).
+PROFITS_SWITCH_SL = os.environ.get("PROFITS_SWITCH_SL", "1") == "1"
+SWITCH_ERO = max(int(DONCHIAN_MULTIPLE * DONCHIAN_PERIOD), 5)
 BOLLINGER_PERIOD = int(os.environ.get("PROFITS_BOLLINGER_PERIOD", "20"))
 BOLLINGER_STD = float(os.environ.get("PROFITS_BOLLINGER_STD", "2"))
 # --- watchlist & filter ---
@@ -737,10 +743,17 @@ class ProfitsBot:
             flat = sum(1 for i in range(1, len(close)) if close[i] == close[i - 1])
             flat_pct = 100.0 * flat / (len(close) - 1)
 
-        # SL Donchian (2.8x period) — dipakai utk ind_snap & log
-        lookback = max(int(2.8 * DONCHIAN_PERIOD), 5)
-        dc = ind.donchian(close, lookback)
-        sl_lower = dc["lower"] if dc else None
+        # SL Donchian (2.8x period) — dipakai utk ind_snap & log.
+        # PROFITS_SWITCH_SL=1: sl = switch (ac==1?s:r) paritas EA/protraderbot/usbot —
+        # di regime DOWN sl = band atas => sinyal SHORT/FLIP lebih awal (fix propagasi
+        # error dari profitsbot yang jadi acuan usbot; usbot udah switch).
+        lookback = max(int(DONCHIAN_MULTIPLE * DONCHIAN_PERIOD), 5)
+        if PROFITS_SWITCH_SL:
+            sl_arr = ind.donchian_sl_switch(high, low, DONCHIAN_MULTIPLE, DONCHIAN_PERIOD)
+            sl_lower = sl_arr[-1] if sl_arr else None
+        else:
+            dc = ind.donchian(close, lookback)
+            sl_lower = dc["lower"] if dc else None
 
         action, score, reasons = "HOLD", 0, []
         ind_snap = {"last": close_last, "pdi": last["pdi"], "mdi": last["mdi"],
