@@ -1167,6 +1167,7 @@ def run_loop(bot, cycle_minutes=CYCLE_MINUTES, interval=SCAN_INTERVAL,
     """
     import time as _t
     last_state = {}
+    last_market_state = None   # cetak "market CLOSED/OPEN" HANYA saat transisi
     last_plan_hash = None
     bot.log(f"LOOP start: cycle {cycle_minutes}m | interval {interval} | "
             f"market {'24 JAM (testing)' if not MARKET_HOURS else f'{MARKET_OPEN}-{MARKET_CLOSE} WIB'} | "
@@ -1174,9 +1175,16 @@ def run_loop(bot, cycle_minutes=CYCLE_MINUTES, interval=SCAN_INTERVAL,
     while True:
         try:
             if not market_open():
-                bot.log("market CLOSED — tunggu jam pasar...")
+                # paritas protraderbot: log sekali saat pasar tutup, jangan spam
+                # tiap menit selama menanti jam bursa.
+                if last_market_state != "closed":
+                    bot.log(f"market CLOSED ({_t.strftime('%H:%M')}) — tunggu jam pasar...")
+                    last_market_state = "closed"
                 _t.sleep(60)
                 continue
+            if last_market_state != "open":
+                bot.log("market OPEN — mulai cycle")
+                last_market_state = "open"
             res = bot.scan_signals(interval=interval)
             # log per-saham ala protraderbot (i/N + action + trend + indikator)
             for i, r in enumerate(res, 1):
