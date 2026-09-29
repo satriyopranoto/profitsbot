@@ -272,6 +272,11 @@ Payload createOrder (TERVERIFIKASI LIVE 2026-08-12):
 - Contoh scan 15m: BUY JECX/MEDC/MMIX; SHORT ANTM/PTBA (bearish kuat).
 
 ## Loop & keselamatan (2026-08-12 — pelajaran mahal!)
+
+- **Log tunggu pasar (2026-09-29, commit `96b9cdf`)**: `run_loop` cetak `market CLOSED (<HH:MM>) — tunggu jam pasar...` / `market OPEN — mulai cycle` **sekali saat transisi** (state `last_market_state`), bukan tiap 60s — paritas protraderbot (`autobot.py` L914-926). Regresi: `test_market_closed_log.py` (3/3).
+- **MIN_PRICE (Rp100) — 3 lapis, jangan dihapus** (audit 2026-09-29): tag `price_skip` di scan (L900-908) + skip di awal loop eksekusi (`if r.get("price_skip"): continue`, L1022) + backstop pakai harga beli RIIL ask/last (L1043-1048). Paritas: protraderbot sempat bolong di lapis eksekusi (insiden TOOL, fix `7d1797f`).
+- **⚠️ RISIKO BELUM DIFIX — `run_once()` pakai strategi PLACEHOLDER**: dipakai hanya kalau TANPA `--loop` (main() L1390-1393); isinya beli kalau `cur <= prev*0.99` (komentar "GANTI dgn strategi") via `place_order(is_buy=True)` **tanpa guard MIN_PRICE/ADX/uptrend/RSI**. Dry-run aman (`place_order`: `if not self.live: return plan`), tapi `python profits_bot.py --live` tanpa `--loop` = order REAL pakai aturan dummy.
+
 - `run_loop`: scan top-15 (log per-saham ala protraderbot) -> HOLDING baris TURUN per posisi
   + badge sinyal [BUY]/[SHORT]/[TP] (TP = floating > TP_PCT) -> log CASH tiap cycle
   -> execute (top-15 + sinyal posisi lama — SHORT posisi = EXIT LONG otomatis) -> check_exit TP.
