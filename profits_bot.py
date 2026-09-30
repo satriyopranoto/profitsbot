@@ -35,6 +35,10 @@ ADX_THRESHOLD = float(os.environ.get("PROFITS_ADX_THRESHOLD", "20"))  # minimal 
 ADX_CROSS = float(os.environ.get("PROFITS_ADX_CROSS", "15"))  # ADX min utk deteksi cross
 DONCHIAN_PERIOD = int(os.environ.get("PROFITS_DONCHIAN_PERIOD", "10"))  # SL lookback = 2.8x period
 DONCHIAN_MULTIPLE = float(os.environ.get("PROFITS_DONCHIAN_MULTIPLE", "2.8"))  # SL multiple
+# Pemasangan SL setelah BUY (paritas protraderbot/usbot, fix 2026-09-30): posisi
+# baru sering belum ter-registrasi server -> "stock not found", jadi dicoba ulang.
+SL_RETRY = int(os.environ.get("PROFITS_SL_RETRY", "3"))            # jumlah percobaan
+SL_RETRY_DELAY = float(os.environ.get("PROFITS_SL_RETRY_DELAY", "3"))  # jeda (detik)
 # Switch SL (paritas EA/protraderbot/usbot): sl = ac==1 ? s(low) : r(high). Saat regime
 # DOWN (ac=-1) sl = band ATAS => high<sl mudah -> sinyal SHORT/FLIP lebih awal. Flip
 # tetap HANYA kalau rumus short PENUH terpenuhi (bukan semata regime change).
@@ -916,24 +920,67 @@ class ProfitsBot:
         ), reverse=True)
         return results
 
-    def sl_donchian_plan(self, code, interval="15m"):
-        """SL berbasis Donchian — lookback = 2.8 x DONCHIAN_PERIOD bar (spt protraderbot).
+    def sl_trigger(self, lower):
+        """Trigger SL dari level band-bawah: 1 tick IDX di bawah level.
 
-        Dari OHLC Yahoo: lower = min(close, lookback) — trigger = lower - 1 tick.
-        Return {code, trigger, lower, upper} — trigger integer (harga IDX).
+        Paritas protraderbot `next_tick_down()` (CL=2000 -> 1995, tick 5).
+        Dipakai SEMUA jalur pemasangan SL (beli & reconcile_sl) supaya harga yang
+        dikirim selalu kelipatan tick sah — fix 2026-09-30: dulu `int(sl)` mentah
+        (mis. 1999 = bukan tick) sehingga bisa ditolak/dibulatkan server.
+
+        Defensif: level dibulatkan ke BAWAH ke kelipatan tick sah dulu, karena
+        sumber harga bisa bukan tick-aligned (fallback Yahoo adjusted / truncation
+        float). Untuk level yang sudah tick-aligned (kasus normal dari ChartCloud)
+        hasilnya identik dengan protraderbot.
         """
-        lookback = max(int(2.8 * DONCHIAN_PERIOD), 5)
+        p = int(lower)
+        t = ind.tick_size(p)
+        if p % t:
+            p -= p % t
+        return max(ind.next_tick_down(p), 1)
+
+    def install_sl_now(self, code, trigger, qty_lot):
+        """Pasang SL segera setelah BUY, dengan retry (paritas protraderbot/usbot).
+
+        Posisi yang baru dibeli sering belum ter-registrasi di server -> tolak
+        ("stock not found" / "exceed maximum quantity"), jadi dicoba beberapa kali
+        (PROFITS_SL_RETRY x PROFITS_SL_RETRY_DELAY). Kalau semua gagal, posisi
+        dibiarkan TANPA SL dan `reconcile_sl()` jadi jaring pengaman cycle berikutnya.
+        """
+        n = max(int(SL_RETRY), 1)
+        for att in range(n):
+            r = self.set_stop_loss(code, int(trigger), qty_lot)
+            if not (r.get("errors") or r.get("error")):
+                tag = "" if self.live else " [DRY-RUN]"
+                self.log(f"  SL {code}: trigger {int(trigger)} qty {qty_lot} lot{tag}")
+                return True
+            self.log(f"  ! SL {code} gagal (attempt {att + 1}/{n} — posisi mungkin "
+                     f"belum ter-registrasi): {str(r)[:120]}")
+            if att < n - 1:
+                time.sleep(SL_RETRY_DELAY)
+        self.log(f"  !!! SL {code} GAGAL {n}x — posisi TANPA SL, reconcile_sl akan coba lagi")
+        return False
+
+    def sl_donchian_plan(self, code, interval="15m"):
+        """SL plan — SATU formula dgn SL yang DIPASANG (paritas CR/protraderbot).
+
+        lower = min(low, lookback) — LLV, sumber SAMA dengan `sl_donchian_price`
+        (yang dipakai reconcile_sl utk memasang); trigger = lower − 1 tick IDX.
+        Dipakai utk SIZING, jadi levelnya WAJIB sama dgn SL yang benar-benar
+        dipasang — fix 2026-09-30: dulu pakai min(close,28)−1 (lebih ketat dari
+        SL terpasang min(low,28)) sehingga risk per trade understated.
+        Return {code, trigger, lower, lookback} — trigger integer (harga IDX).
+        """
+        lookback = max(int(DONCHIAN_MULTIPLE * DONCHIAN_PERIOD), 5)
         ohlc = self.fetch_ohlc(code, interval, "5d")
-        if isinstance(ohlc, dict) or len(ohlc) < lookback:
+        if isinstance(ohlc, dict) or not ohlc or len(ohlc) < lookback:
             return {"code": code, "error": f"data kurang ({len(ohlc) if not isinstance(ohlc, dict) else '?'} < {lookback})"}
-        closes = [x["c"] for x in ohlc]
-        dc = ind.donchian(closes, lookback)
-        if not dc:
-            return {"code": code, "error": "donchian gagal"}
-        trigger = max(int(dc["lower"]) - 1, 1)
-        return {"code": code, "trigger": trigger,
-                "lower": round(dc["lower"]), "upper": round(dc["upper"]),
-                "lookback": lookback}
+        lows = [x.get("l") for x in ohlc[-lookback:]]
+        if not lows or any(x is None for x in lows):
+            return {"code": code, "error": "data low kosong"}
+        lower = min(lows)
+        return {"code": code, "trigger": self.sl_trigger(lower),
+                "lower": round(lower), "lookback": lookback}
 
     def reconcile_sl(self, dc_mult=None, dc_per=None):
         """Auto-pasang Stop Loss utk SEMUA posisi yang belum ber-SL.
@@ -975,22 +1022,24 @@ class ProfitsBot:
                       (px or {}).get("price") or 0
             except Exception:
                 cur = 0
-            if cur and sl >= cur:
-                skipped.append(f"{code}(tembus sl{int(sl)}>=cur{int(cur)})")
+            trig = self.sl_trigger(sl)  # 1 tick IDX di bawah level (kelipatan tick sah)
+            if cur and trig >= cur:
+                skipped.append(f"{code}(tembus trig{trig}>=cur{int(cur)})")
                 missing.append(code)
-                self.log(f"SL reconcile {code}: SL {int(sl)} >= current {int(cur)} (tembus) -> SKIP, butuh level manual")
+                self.log(f"SL reconcile {code}: trig {trig} (level {int(sl)}) >= current "
+                         f"{int(cur)} (tembus) -> SKIP, butuh level manual")
                 continue
-            r = self.set_stop_loss(code, int(sl), qtys[code])
+            r = self.set_stop_loss(code, trig, qtys[code])
             if not self.live:
                 placed.append(code)  # DRY-RUN: rencana tercatat, tak terkirim
                 continue
             if not (r.get("errors") or r.get("error")):
                 placed.append(code)
-                self.log(f"SL reconcile {code}: pasang trig={int(sl)} qty={qtys[code]}")
+                self.log(f"SL reconcile {code}: pasang trig={trig} (level {int(sl)}) qty={qtys[code]}")
             else:
                 skipped.append(f"{code}(err {str(r)[:80]})")
                 missing.append(code)
-                self.log(f"SL reconcile {code}: GAGAL trig={int(sl)} qty={qtys[code]}: {str(r)[:160]}")
+                self.log(f"SL reconcile {code}: GAGAL trig={trig} qty={qtys[code]}: {str(r)[:160]}")
         return placed, missing, skipped
 
     def execute_signals(self, results, min_score=1, live=False):
@@ -1087,7 +1136,11 @@ class ProfitsBot:
                     executed.append(plan)
                     if sl_price:
                         plan["sl_donchian"] = sl_price
-                        self.log(f"  SL plan {code}: trigger {sl_price} (lookback {sl.get('lookback')} bar, Donchian lower {sl.get('lower')})")
+                        self.log(f"  SL plan {code}: trigger {sl_price} "
+                                 f"(level {sl.get('lower')}, lookback {sl.get('lookback')} bar)")
+                        # Pasang SL SEGERA (paritas protraderbot/usbot) — jangan tunggu
+                        # reconcile cycle berikutnya. reconcile_sl tetap jaring pengaman.
+                        self.install_sl_now(code, sl_price, qty_lot)
             elif r["action"] == "SHORT" and r["score"] >= min_score:
                 code = r["code"]
                 # FLIP off -> sinyal SHORT TIDAK dieksekusi (exit hanya TP)

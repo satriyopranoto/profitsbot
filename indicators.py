@@ -126,6 +126,32 @@ def adx_sma_pct(adx_series_list, close, sma20_list, window=100, adx_min=25):
     return pct, f"Sideways ({pct:.0f}%)", valid
 
 
+def tick_size(price):
+    """Tick size (fraksi harga) sesuai range harga IDX.
+
+    <200 → 1 | 200-500 → 2 | 500-2000 → 5 | 2000-5000 → 10 | >5000 → 25
+    (port paritas protraderbot/indicators.py — dipakai utk trigger SL).
+    """
+    if price < 200:
+        return 1
+    if price < 500:
+        return 2
+    if price <= 2000:
+        return 5
+    if price <= 5000:
+        return 10
+    return 25
+
+
+def next_tick_down(price):
+    """1 tick di bawah price (mis. CL=2000 → 1995, karena tick 5).
+
+    Paritas protraderbot next_tick_down() — SEMUA trigger SL wajib lewat sini
+    supaya harga yang dikirim selalu kelipatan tick sah (fix 2026-09-30).
+    """
+    return price - tick_size(price)
+
+
 def donchian(vals, n=20):
     """Donchian Channel (approksimasi close-only): high/low dari close terakhir n."""
     if len(vals) < n:
