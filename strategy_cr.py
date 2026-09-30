@@ -243,6 +243,9 @@ def snapshot(o, h, l, c):
       buyit/shortit : bool (sudah termasuk gate RSI + gate switch-SL)
       sl_sw         : switch-SL bar terakhir (= band-bawah saat regime UP)
       hbuy/lsell    : level trigger aktif (NaN kalau belum ada proxbuy/proxsell)
+      hbuy1/lsell1  : level trigger bar SEBELUMNYA ([1] Pine) — dipakai utk audit,
+                      karena Buyit/Shortit membandingkan close dgn hbuy[1] JUGA
+                      (`close > hbuy[1] or close > hbuy`)
       rsi           : RSI utk log (lihat _rsi_display)
       score         : -ROC(SCORE_ROC) utk ranking (None kalau data kurang)
       n             : jumlah bar yang dipakai
@@ -257,6 +260,14 @@ def snapshot(o, h, l, c):
         except Exception:
             return None
 
+    def _f1(a):
+        """Nilai bar SEBELUMNYA ([-2] = `[1]` di Pine). None kalau data < 2 bar."""
+        try:
+            v = float(a[-2])
+            return None if np.isnan(v) else v
+        except Exception:
+            return None
+
     rsi = _rsi_display(c)
     score = None
     if SCORE_ROC > 0 and len(c) > SCORE_ROC and c[-1 - SCORE_ROC]:
@@ -267,6 +278,8 @@ def snapshot(o, h, l, c):
         "sl_sw": _f(ind["sl_sw"]),
         "hbuy": _f(ind["hbuy"]),
         "lsell": _f(ind["lsell"]),
+        "hbuy1": _f1(ind["hbuy"]),
+        "lsell1": _f1(ind["lsell"]),
         "rsi": _f(rsi),
         "score": score,
         "n": int(len(c)),

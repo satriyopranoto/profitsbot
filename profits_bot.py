@@ -920,20 +920,24 @@ class ProfitsBot:
         action, score, reasons = "HOLD", 0, []
         if snap["buyit"]:
             action, score = "BUY", 1
-            reasons.append(f"CR Buyit: close {_s(c[-1])} > hbuy {_s(snap['hbuy'])}, "
+            reasons.append(f"CR Buyit: close {_s(c[-1])} > hbuy[1] {_s(snap['hbuy1'])} "
+                           f"atau hbuy {_s(snap['hbuy'])}, "
                            f"low > switch-SL {_s(snap['sl_sw'])}, "
                            f"RSI {_s(snap['rsi'])} > {cr.RSI_BUYIT:g}")
         elif snap["shortit"]:
             action, score = "SHORT", 1
-            reasons.append(f"CR Shortit: close {_s(c[-1])} < lsell {_s(snap['lsell'])}, "
+            reasons.append(f"CR Shortit: close {_s(c[-1])} < lsell[1] {_s(snap['lsell1'])} "
+                           f"atau lsell {_s(snap['lsell'])}, "
                            f"high < switch-SL {_s(snap['sl_sw'])}, "
                            f"RSI {_s(snap['rsi'])} < {cr.RSI_SHORTIT:g}")
         else:
             reasons.append(f"CR HOLD: RSI {_s(snap['rsi'])}, switch-SL {_s(snap['sl_sw'])}, "
-                           f"hbuy {_s(snap['hbuy'])}, lsell {_s(snap['lsell'])}, "
+                           f"hbuy[1] {_s(snap['hbuy1'])}/hbuy {_s(snap['hbuy'])}, "
+                           f"lsell[1] {_s(snap['lsell1'])}/lsell {_s(snap['lsell'])}, "
                            f"skor {_s(snap['score'], '{:+.1f}')}")
         ind_snap = {"last": c[-1], "sl": snap["sl_sw"], "rsi": snap["rsi"],
                     "hbuy": snap["hbuy"], "lsell": snap["lsell"],
+                    "hbuy1": snap["hbuy1"], "lsell1": snap["lsell1"],
                     "cr_score": snap["score"], "adx_sma_pct": 0.0,
                     "trend_comment": f"CR (switch-SL {_s(snap['sl_sw'])})"}
         return {"code": code, "action": action, "score": score, "reasons": reasons,
@@ -1348,14 +1352,18 @@ def run_loop(bot, cycle_minutes=CYCLE_MINUTES, interval=SCAN_INTERVAL,
                 comm = ind.get("trend_comment") or ""
                 act_disp = "SKIP-PRICE" if r.get("price_skip") else r["action"]
                 if STRATEGY == "cr":
-                    _rsi = ind.get("rsi"); _sl = ind.get("sl"); _sc = ind.get("cr_score")
-                    _hb = ind.get("hbuy"); _ls = ind.get("lsell")
+                    _rsi = ind.get("rsi"); _sc = ind.get("cr_score")
+                    _hb = ind.get("hbuy"); _hb1 = ind.get("hbuy1")
+                    _ls = ind.get("lsell"); _ls1 = ind.get("lsell1")
+
+                    def _lv(v):
+                        return "-" if v is None else format(v, ".0f")
+
                     bot.log(
                         f"[{i}/{len(res)}] {r['code']:<6} {act_disp:10s} [{comm}] "
                         f"RSI={0 if _rsi is None else _rsi:.0f} "
-                        f"switchSL={0 if _sl is None else _sl:.0f} "
-                        f"hbuy={'-' if _hb is None else format(_hb, '.0f')} "
-                        f"lsell={'-' if _ls is None else format(_ls, '.0f')} "
+                        f"hbuy1={_lv(_hb1)} hbuy={_lv(_hb)} "
+                        f"lsell1={_lv(_ls1)} lsell={_lv(_ls)} "
                         f"last={ind.get('last', 0):.0f} "
                         f"skor={0 if _sc is None else _sc:+.1f} "
                         f"val={r.get('value', 0)/1e9:.2f}B")

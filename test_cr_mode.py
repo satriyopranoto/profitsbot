@@ -60,7 +60,9 @@ def bot(kode):
 
 
 print("1) default strategi")
-cek("STRATEGY default", P.STRATEGY, "adx_rsi")
+_harap = (os.environ.get("PROFITS_STRATEGY") or "adx_rsi").strip().lower()
+cek("STRATEGY = .env (atau default adx_rsi)", P.STRATEGY, _harap)
+cek_true("STRATEGY valid", P.STRATEGY in ("adx_rsi", "cr"), f"= {P.STRATEGY}")
 cek("CR rank default", P.CR_SCORE_ORDER, "fallen")
 
 print("\n2) cr_signal == runner (bar terakhir)")
@@ -77,6 +79,14 @@ for kode in CODES:
     cek(f"{kode}: action", sig["action"], harap)
     cek_true(f"{kode}: ind['sl'] == runner sl_sw[-1]",
              abs((sig["ind"]["sl"] or 0) - float(ind["sl_sw"][-1])) < 1e-6)
+    # hbuy1/lsell1 = nilai bar SEBELUMNYA (bagian dari kondisi Buyit/Shortit) -> audit
+    import math
+    for key, arr in (("hbuy1", ind["hbuy"]), ("lsell1", ind["lsell"])):
+        want = float(arr[-2])
+        got = sig["ind"][key]
+        sam = (got is None and math.isnan(want)) or \
+              (got is not None and not math.isnan(want) and abs(got - want) < 1e-6)
+        cek_true(f"{kode}: {key} == {key[:-1]}[-2]", sam, f"(got {got} want {want})")
 
 print("\n3) scan_signals mode CR — urutan skor 'fallen' (paling turun dulu)")
 try:
