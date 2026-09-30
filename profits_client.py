@@ -65,7 +65,16 @@ _trade_session = None  # {accessToken, refreshToken, ...} dari /identity/trade/l
 
 
 def load_env(path=".env"):
-    """Parse .env sederhana -> os.environ (tanpa dependensi)."""
+    """Parse .env sederhana -> os.environ (tanpa dependensi).
+
+    FIX 30-Sep-2026: komentar inline (` # ...`) DIPOTONG. Sebelumnya nilai ikut
+    memuat komentar sehingga `int(os.environ.get(...))` meledak (ValueError) —
+    padahal template/.env memakai komentar setelah nilai.
+    Aturan aman:
+      - `#` dipotong HANYA kalau di luar tanda kutip DAN didahului spasi (jadi
+        password yang memuat `#` tanpa spasi tetap utuh);
+      - nilai ber-quote `"a # b"` tetap utuh.
+    """
     if not os.path.exists(path):
         return
     with open(path, encoding="utf-8") as f:
@@ -74,7 +83,15 @@ def load_env(path=".env"):
             if not line or line.startswith("#") or "=" not in line:
                 continue
             k, v = line.split("=", 1)
-            os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+            out, q = [], None
+            for i, ch in enumerate(v):
+                if ch in "\"'":
+                    q = None if q == ch else (ch if q is None else q)
+                if ch == "#" and q is None and i > 0 and v[i - 1] in " \t":
+                    break
+                out.append(ch)
+            v = "".join(out).strip().strip('"').strip("'")
+            os.environ.setdefault(k.strip(), v)
 
 
 def _req(method, path, payload=None, token=None, app_header=False, extra=None):
