@@ -629,6 +629,23 @@ class ProfitsBot:
                 pass
 
     # ---- siklus ----
+    def _days_back_for(self, interval, need_bars):
+        """Hitung `days_back` ChartCloud dari TF & kebutuhan bar (fix 30-Sep-2026).
+
+        ChartCloud membatasi histori lewat `days_back` (BUKAN countback): days_back=10
+        cuma memberi ~8 bar D1 / 102 bar M30 → mode CR (butuh 150 bar) selalu "data kurang".
+        Perkiraan: intraday ≈ 390 menit bursa/hari; harian = 1 bar/hari bursa
+        (kalender ≈ 1,7x hari bursa). Dibatasi 10..1500 hari.
+        """
+        tf_min = {"1m": 1, "2m": 2, "5m": 5, "15m": 15, "30m": 30, "45m": 45,
+                  "60m": 60, "1h": 60}.get(interval)
+        if tf_min:
+            per_day = max(1, 390 // tf_min)
+            days = int(need_bars / per_day * 1.7) + 5
+        else:
+            days = int(need_bars * 1.7) + 30
+        return min(max(days, 10), 1500)
+
     def fetch_ohlc(self, code, interval="15m", range_="5d", min_bars=0):
         """OHLC multi-source (fallback chain):
 
@@ -637,14 +654,21 @@ class ProfitsBot:
         min_bars: utk scanning (adx_sma_pct 'last N bar') minta history cukup — kalau
         tidak, statistic bisa dihitung dari jendela pendek & melonjak (kasus VKTR).
         Return list dict {t: epoch, o,h,l,c, v} urut waktu / {error: ...}.
+
+        FIX 30-Sep-2026 (gejala: mode CR selalu "data kurang (err<150 bar)"):
+        (a) days_back dihitung dari TF & kebutuhan bar (`_days_back_for`) — dulu
+            hardcode 10 hari → D1 cuma 8 bar, M30 102 bar;
+        (b) fallback Yahoo mencoba SEMUA range yang VALID utk TF-nya — dulu `1y`
+            di TF intraday balas 422 dan LANGSUNG dianggap error (tanpa coba `1mo`).
         """
         import urllib.request, urllib.error
+        need = max(28, int(min_bars or 0))
         # 1) protrader api_server: OHLC asli ChartCloud POEMS
         res_map = {"1m": "1", "5m": "5", "15m": "15", "30m": "30", "45m": "45",
                    "60m": "60", "1h": "60", "1d": "D", "D": "D"}
         url = (f"{PROTRADER_API}/chart/{code}"
                f"?resolution={res_map.get(interval, '15')}"
-               f"&countback=2000&days_back=10")
+               f"&countback=2000&days_back={self._days_back_for(interval, need)}")
         req = urllib.request.Request(url, headers={"User-Agent": "profitsbot/1.0"})
         try:
             with urllib.request.urlopen(req, timeout=25) as resp:
@@ -654,13 +678,17 @@ class ProfitsBot:
             # cuma 15 bar) padahal Yahoo punya 113 bar. Data < lookback SL (28)
             # gak cukup utk Donchian/ADX -> jangan dipakai, turun ke fallback Yahoo.
             # Kalau min_bars diset (scan), butuh bar sebanyak itu biar statistic valid.
-            if isinstance(rows, list) and len(rows) >= max(28, min_bars):
+            if isinstance(rows, list) and len(rows) >= need:
                 return rows
         except Exception:
             pass
-        # 2) fallback Yahoo (delay) — coba range makin panjang utk saham tipis/kurang
-        #    data (kasus MDIA: 5d cuma ~15 bar close valid padahal 1mo = 260).
-        for range_opt in [range_, "1mo", "3mo", "1y"]:
+        # 2) fallback Yahoo (delay) — range HARUS valid utk TF (Yahoo: intraday maks
+        #    ~60 hari; `1y`/`2y` hanya utk harian). Coba berurutan; error hanya
+        #    dikembalikan kalau SEMUA percobaan gagal.
+        intraday = interval.endswith("m") or interval in ("1h",)
+        cands = ["1mo", "5d", "1d"] if intraday else [range_ or "1y", "1y", "2y"]
+        last_err = None
+        for range_opt in cands:
             url = (f"https://query1.finance.yahoo.com/v8/finance/chart/{code}.JK"
                    f"?range={range_opt}&interval={interval}")
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
@@ -668,13 +696,11 @@ class ProfitsBot:
                 with urllib.request.urlopen(req, timeout=20) as resp:
                     r = json.loads(resp.read().decode())
             except Exception as e:
-                if range_opt == "1y":
-                    return {"error": str(e)}
+                last_err = f"{range_opt}: {e}"
                 continue
             res = (r.get("chart", {}).get("result") or [])
             if not res:
-                if range_opt == "1y":
-                    return {"error": "kosong"}
+                last_err = f"{range_opt}: kosong"
                 continue
             ts = res[0].get("timestamp") or []
             q = (res[0].get("indicators", {}).get("quote") or [{}])[0]
@@ -684,8 +710,9 @@ class ProfitsBot:
                     continue
                 rows.append({"t": ts[i], "o": q["open"][i], "h": q["high"][i],
                              "l": q["low"][i], "c": q["close"][i], "v": q["volume"][i]})
-            if len(rows) >= max(28, min_bars) or range_opt == "1y":
+            if len(rows) >= need or range_opt == cands[-1]:
                 return rows
+        return {"error": last_err or "kosong"}
 
     def real_time_price(self, code, timeout=8):
         """Harga real-time multi-source (fallback chain):
@@ -882,9 +909,10 @@ class ProfitsBot:
 
         ohlc = self.fetch_ohlc(code, interval, CR_DATA_RANGE, min_bars=CR_MIN_BARS)
         if isinstance(ohlc, dict) or not ohlc or len(ohlc) < CR_MIN_BARS:
+            why = (f"err: {str(ohlc.get('error'))[:70]}" if isinstance(ohlc, dict)
+                   else f"{0 if not ohlc else len(ohlc)} bar")
             return {"code": code, "action": "HOLD", "score": 0,
-                    "reasons": [f"CR: data kurang ({'err' if isinstance(ohlc, dict) else len(ohlc)}"
-                                f"<{CR_MIN_BARS} bar)"],
+                    "reasons": [f"CR: data kurang ({why} < {CR_MIN_BARS} bar, TF {interval})"],
                     "interval": interval}
         o = [x["o"] for x in ohlc]; h = [x["h"] for x in ohlc]
         l = [x["l"] for x in ohlc]; c = [x["c"] for x in ohlc]
