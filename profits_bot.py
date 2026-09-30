@@ -39,6 +39,17 @@ DONCHIAN_MULTIPLE = float(os.environ.get("PROFITS_DONCHIAN_MULTIPLE", "2.8"))  #
 # baru sering belum ter-registrasi server -> "stock not found", jadi dicoba ulang.
 SL_RETRY = int(os.environ.get("PROFITS_SL_RETRY", "3"))            # jumlah percobaan
 SL_RETRY_DELAY = float(os.environ.get("PROFITS_SL_RETRY_DELAY", "3"))  # jeda (detik)
+# ── STRATEGI SINYAL (30-Sep-2026): 'adx_rsi' (default = perilaku lama) | 'cr' (Candle Rejection) ──
+# Mode cr: Buyit/Shortit dari strategy_cr.py (port 1:1 runner backtest; diuji
+# test_cr_parity.py). Gate uptrend TIDAK berlaku di mode cr (keputusan user:
+# CR = early entry) dan ranking pakai skor -ROC. TP/FLIP/SL/cash/order TIDAK berubah.
+STRATEGY = os.environ.get("PROFITS_STRATEGY", "adx_rsi").strip().lower()
+CR_MIN_BARS = int(os.environ.get("PROFITS_CR_MIN_BARS", "150"))    # minimal bar utk sinyal CR
+CR_DATA_RANGE = os.environ.get("PROFITS_CR_DATA_RANGE", "1y")      # range fallback Yahoo
+# Arah ranking skor CR (-ROC(60)): 'fallen' = saham paling TURUN dipilih lebih dulu
+# (niat desain CR / early entry — DD & PF/WR lebih baik) | 'riser' = paling NAIK dulu
+# (return portofolio backtest lebih tinggi tapi path-dependent 1-2 nama monster).
+CR_SCORE_ORDER = os.environ.get("PROFITS_CR_SCORE_ORDER", "fallen").strip().lower()
 # Switch SL (paritas EA/protraderbot/usbot): sl = ac==1 ? s(low) : r(high). Saat regime
 # DOWN (ac=-1) sl = band ATAS => high<sl mudah -> sinyal SHORT/FLIP lebih awal. Flip
 # tetap HANYA kalau rumus short PENUH terpenuhi (bukan semata regime change).
@@ -853,6 +864,53 @@ class ProfitsBot:
         return {"code": code, "action": action, "score": score,
                 "reasons": reasons, "ind": ind_snap, "interval": interval}
 
+    def cr_signal(self, code, interval="15m"):
+        """Sinyal CANDLE REJECTION (Buyit/Shortit) — dipakai saat PROFITS_STRATEGY=cr.
+
+        Port 1:1 dari runner backtest (`strategy_cr.py`; paritas dijamin
+        `test_cr_parity.py` — array identik dgn run_id_candle_rejection.py).
+        TF mengikuti `interval` (= PROFITS_SCAN_INTERVAL) — TIDAK di-hardcode.
+        Buyit  -> action BUY ;  Shortit -> action SHORT (= EXIT LONG / FLIP di bot,
+        karena IDX cash-only tidak bisa short).
+        `ind` memuat kunci yang dipakai jalur hilir: last (harga), sl (switch-SL),
+        rsi, cr_score (ranking), adx_sma_pct=0 (gate tidak dipakai di mode cr).
+        """
+        import strategy_cr as cr
+
+        def _s(v, f="{:.0f}"):
+            return "n/a" if v is None else f.format(v)
+
+        ohlc = self.fetch_ohlc(code, interval, CR_DATA_RANGE, min_bars=CR_MIN_BARS)
+        if isinstance(ohlc, dict) or not ohlc or len(ohlc) < CR_MIN_BARS:
+            return {"code": code, "action": "HOLD", "score": 0,
+                    "reasons": [f"CR: data kurang ({'err' if isinstance(ohlc, dict) else len(ohlc)}"
+                                f"<{CR_MIN_BARS} bar)"],
+                    "interval": interval}
+        o = [x["o"] for x in ohlc]; h = [x["h"] for x in ohlc]
+        l = [x["l"] for x in ohlc]; c = [x["c"] for x in ohlc]
+        snap = cr.snapshot(o, h, l, c)
+        action, score, reasons = "HOLD", 0, []
+        if snap["buyit"]:
+            action, score = "BUY", 1
+            reasons.append(f"CR Buyit: close {_s(c[-1])} > hbuy {_s(snap['hbuy'])}, "
+                           f"low > switch-SL {_s(snap['sl_sw'])}, "
+                           f"RSI {_s(snap['rsi'])} > {cr.RSI_BUYIT:g}")
+        elif snap["shortit"]:
+            action, score = "SHORT", 1
+            reasons.append(f"CR Shortit: close {_s(c[-1])} < lsell {_s(snap['lsell'])}, "
+                           f"high < switch-SL {_s(snap['sl_sw'])}, "
+                           f"RSI {_s(snap['rsi'])} < {cr.RSI_SHORTIT:g}")
+        else:
+            reasons.append(f"CR HOLD: RSI {_s(snap['rsi'])}, switch-SL {_s(snap['sl_sw'])}, "
+                           f"hbuy {_s(snap['hbuy'])}, lsell {_s(snap['lsell'])}, "
+                           f"skor {_s(snap['score'], '{:+.1f}')}")
+        ind_snap = {"last": c[-1], "sl": snap["sl_sw"], "rsi": snap["rsi"],
+                    "hbuy": snap["hbuy"], "lsell": snap["lsell"],
+                    "cr_score": snap["score"], "adx_sma_pct": 0.0,
+                    "trend_comment": f"CR (switch-SL {_s(snap['sl_sw'])})"}
+        return {"code": code, "action": action, "score": score, "reasons": reasons,
+                "ind": ind_snap, "interval": interval}
+
     def scan_signals(self, codes=None, interval="15m"):
         """Scan daftar saham (default: top values TOP_VALUES — fallback SYMBOLS kalau kosong).
 
@@ -878,7 +936,8 @@ class ProfitsBot:
         results = []
         for c in codes:
             try:
-                r = self.signal(c, interval)
+                r = (self.cr_signal(c, interval) if STRATEGY == "cr"
+                     else self.signal(c, interval))
                 r["value"] = values.get(c, 0)  # likuiditas (nilai transaksi, jt)
                 results.append(r)
             except Exception as e:
@@ -913,11 +972,24 @@ class ProfitsBot:
         # ranking PERSIS stocktrade screener (line 2513 app.py):
         #   sort by (rekomendasi, adx_sma_pct = statistic bullish, value) desc
         action_rank = {"BUY": 3, "SHORT": 2, "HOLD": 0}
-        results.sort(key=lambda r: (
-            action_rank.get(r["action"], 0),
-            (r.get("ind") or {}).get("adx_sma_pct", 0) or 0,
-            r.get("value", 0) or 0
-        ), reverse=True)
+        if STRATEGY == "cr":
+            # Mode CR: ranking = skor CR (-ROC(60)); arah dari PROFITS_CR_SCORE_ORDER:
+            #   'fallen' (default) = saham paling TURUN dulu -> skor (-ROC) TERBESAR dulu;
+            #   'riser'          = saham paling NAIK dulu.
+            # Tidak memakai statistik uptrend (gate OFF utk CR).
+            def _cr_key(r):
+                sc = (r.get("ind") or {}).get("cr_score")
+                sc = -1e9 if sc is None else sc
+                return (action_rank.get(r["action"], 0),
+                        sc if CR_SCORE_ORDER == "fallen" else -sc,
+                        r.get("value", 0) or 0)
+            results.sort(key=_cr_key, reverse=True)
+        else:
+            results.sort(key=lambda r: (
+                action_rank.get(r["action"], 0),
+                (r.get("ind") or {}).get("adx_sma_pct", 0) or 0,
+                r.get("value", 0) or 0
+            ), reverse=True)
         return results
 
     def sl_trigger(self, lower):
@@ -1070,9 +1142,11 @@ class ProfitsBot:
                 # ditandai di scan (harga < MIN_PRICE) — jangan dibeli
                 if r.get("price_skip"):
                     continue
-                # syarat buy: HANYA uptrend kuat (statistic bullish >= UPTREND_MIN_PCT)
+                # syarat buy: uptrend kuat (statistic bullish >= UPTREND_MIN_PCT).
+                # ⚠️ HANYA mode adx_rsi — mode cr SENGAJA tanpa gate (keputusan user
+                # 30-Sep-2026: keunggulan CR = early entry, gate berlawanan dgn itu).
                 ind_s = r.get("ind") or {}
-                if BUY_UPTREND_ONLY and (ind_s.get("adx_sma_pct") or 0) < UPTREND_MIN_PCT:
+                if STRATEGY != "cr" and BUY_UPTREND_ONLY and (ind_s.get("adx_sma_pct") or 0) < UPTREND_MIN_PCT:
                     self.log(f"[SKIP] {code} bukan uptrend kuat (bullish {ind_s.get('adx_sma_pct')}% < {UPTREND_MIN_PCT:.0f}%) — buy hanya uptrend kuat")
                     continue
                 if code in positions:
@@ -1223,6 +1297,7 @@ def run_loop(bot, cycle_minutes=CYCLE_MINUTES, interval=SCAN_INTERVAL,
     last_market_state = None   # cetak "market CLOSED/OPEN" HANYA saat transisi
     last_plan_hash = None
     bot.log(f"LOOP start: cycle {cycle_minutes}m | interval {interval} | "
+            f"strategi {STRATEGY} | "
             f"market {'24 JAM (testing)' if not MARKET_HOURS else f'{MARKET_OPEN}-{MARKET_CLOSE} WIB'} | "
             f"execute={'LIVE' if bot.live else 'DRY-RUN'}")
     while True:
@@ -1244,12 +1319,25 @@ def run_loop(bot, cycle_minutes=CYCLE_MINUTES, interval=SCAN_INTERVAL,
                 ind = r.get("ind") or {}
                 comm = ind.get("trend_comment") or ""
                 act_disp = "SKIP-PRICE" if r.get("price_skip") else r["action"]
-                bot.log(
-                    f"[{i}/{len(res)}] {r['code']:<6} {act_disp:10s} [{comm}] "
-                    f"ADX={ind.get('adx', 0):.1f} +DI={ind.get('pdi', 0):.1f} "
-                    f"-DI={ind.get('mdi', 0):.1f} last={ind.get('last', 0):.0f} "
-                    f"SMA20={ind.get('sma20', 0):.0f} SL={ind.get('sl', 0):.0f} "
-                    f"pct={ind.get('adx_sma_pct', 0):.0f}% val={r.get('value', 0)/1e9:.2f}B")
+                if STRATEGY == "cr":
+                    _rsi = ind.get("rsi"); _sl = ind.get("sl"); _sc = ind.get("cr_score")
+                    _hb = ind.get("hbuy"); _ls = ind.get("lsell")
+                    bot.log(
+                        f"[{i}/{len(res)}] {r['code']:<6} {act_disp:10s} [{comm}] "
+                        f"RSI={0 if _rsi is None else _rsi:.0f} "
+                        f"switchSL={0 if _sl is None else _sl:.0f} "
+                        f"hbuy={'-' if _hb is None else format(_hb, '.0f')} "
+                        f"lsell={'-' if _ls is None else format(_ls, '.0f')} "
+                        f"last={ind.get('last', 0):.0f} "
+                        f"skor={0 if _sc is None else _sc:+.1f} "
+                        f"val={r.get('value', 0)/1e9:.2f}B")
+                else:
+                    bot.log(
+                        f"[{i}/{len(res)}] {r['code']:<6} {act_disp:10s} [{comm}] "
+                        f"ADX={ind.get('adx', 0):.1f} +DI={ind.get('pdi', 0):.1f} "
+                        f"-DI={ind.get('mdi', 0):.1f} last={ind.get('last', 0):.0f} "
+                        f"SMA20={ind.get('sma20', 0):.0f} SL={ind.get('sl', 0):.0f} "
+                        f"pct={ind.get('adx_sma_pct', 0):.0f}% val={r.get('value', 0)/1e9:.2f}B")
             new_sig = []
             for r in res:
                 if r["action"] == "HOLD":
