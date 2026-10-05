@@ -147,7 +147,11 @@ CYCLE_MINUTES = float(os.environ.get("PROFITS_CYCLE_MINUTES", "3"))  # loop scan
 AUTO_EXECUTE = (BOT_MODE == "trade")  # otomatis: nontrade = scan&log; trade = eksekusi real
 MARKET_HOURS = os.environ.get("PROFITS_MARKET_HOURS", "0") == "1"  # 0 = 24 jam (testing); 1 = cuma jam bursa
 MARKET_OPEN = os.environ.get("PROFITS_MARKET_OPEN", "09:00")  # jam pasar WIB (kalau MARKET_HOURS=1)
-MARKET_CLOSE = os.environ.get("PROFITS_MARKET_CLOSE", "15:30")
+# ⚠️ DEFAULT 15:50 = jam tutup bursa IDX (pre-closing 15:50:00, closing 16:00) & PARITAS
+# protraderbot (`config.py` MARKET_CLOSE=15:50). Dulu default 15:30 → bot berhenti scan +
+# berhenti cek exit/TP 20 menit terakhir (lapor user 2026-10-05: "market CLOSED (15:32)").
+# Dibaca SAAT IMPORT → ganti butuh restart bot.
+MARKET_CLOSE = os.environ.get("PROFITS_MARKET_CLOSE", "15:50")
 # --- sizing / risk ---
 CAPITAL = float(os.environ.get("PROFITS_CAPITAL", "100000000"))  # modal default 100 jt
 RISK_PCT = float(os.environ.get("PROFITS_RISK_PCT", "1.0"))  # risk per posisi (%)
