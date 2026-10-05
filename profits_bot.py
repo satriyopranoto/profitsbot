@@ -46,6 +46,47 @@ def _fmt_top_side(d):
     return "{" + ", ".join(parts) + "}"
 
 
+def _aggregate_top_values(items, min_val):
+    """Top-values analytics: nilai per saham = JUMLAH val buy+sell, lalu filter sum.
+
+    Kedua sisi API (`buy` & `sell`) punya nilai BEDA utk saham yang sama (mis. GOTO
+    buy 103,2B vs sell 26,6B) — nilai transaksi BUKAN "matched sama", jangan ambil
+    MAX satu sisi. Fix 2026-10-05 (user): nilai & filter pakai HASIL PENJUMLAHAN.
+
+    Return (rows, filt_fmt, filt_val):
+      rows     = list dict baris (key = sisi dgn val terbesar, `val` DIGANTI total
+                 gabungan buy+sell), sudah urut total-nilai desc
+      filt_fmt = jumlah kode non-[A-Z]{4} yang dibuang
+      filt_val = jumlah kode yang total(buy+sell) < min_val
+    """
+    import re as _re
+    _tot, _rep, filt_fmt = {}, {}, 0
+    for it in items:
+        for _side in ("buy", "sell"):
+            b = it.get(_side) or {}
+            code = str(b.get("code") or "")
+            if not code:
+                continue
+            if not _re.match(r"^[A-Z]{4}$", code):
+                filt_fmt += 1      # bukan regular stock 4 huruf — buang
+                continue
+            _v = b.get("val") or 0
+            _tot[code] = _tot.get(code, 0) + _v
+            if code not in _rep or _v >= _rep[code].get("val", 0):
+                _rep[code] = b     # representasi = sisi dgn val terbesar
+    rows = []
+    filt_val = 0
+    for _c, _v in _tot.items():
+        if _v < min_val:
+            filt_val += 1          # total (buy+sell) di bawah floor likuiditas — buang
+            continue
+        _r = dict(_rep[_c])
+        _r["val"] = _v             # tampilkan & urutkan pakai nilai GABUNGAN
+        rows.append(_r)
+    rows.sort(key=lambda x: x.get("val", 0), reverse=True)
+    return rows, filt_fmt, filt_val
+
+
 # ------------------------- konfigurasi -------------------------
 SYMBOLS = os.environ.get("PROFITS_SYMBOLS", "BBCA,BBRI,ANTM").split(",")
 PROTRADER_API = os.environ.get("PROTRADER_API", "http://127.0.0.1:8777")  # bot protrader (real-time PMP)
@@ -254,7 +295,6 @@ class ProfitsBot:
           - REGULAR: kode 4 huruf kapital (^[A-Z]{4}$) — buang saham kecil/liar
           - MIN_VAL: skip kalau val < MIN_TOP_VAL (anti saham garing saat market dry)
         """
-        import re as _re
         src = (os.environ.get("PROFITS_TOP_SOURCE", "analytics") or "analytics").strip().lower()
         # PRIMARY: market-info realtime (skala benar ~100-340B, sumber UI "Top Value").
         # FALLBACK: /trade-book/trade-book/top-stocks (lama, val ~5x lebih kecil).
@@ -283,40 +323,20 @@ class ProfitsBot:
                 self.log(f"  ... dan {len(items)-15} item lagi")
         except Exception as _e:
             self.log(f"[TOP-VALUES] diagnostik gagal: {_e}")
-        rows = []
-        filt_fmt = filt_val = 0
-        for it in items:
-            for _side in ("buy", "sell"):
-                b = it.get(_side) or {}
-                code = str(b.get("code") or "")
-                if not code:
-                    continue
-                if not _re.match(r"^[A-Z]{4}$", code):
-                    filt_fmt += 1  # bukan regular stock 4 huruf — buang
-                    continue
-                val = b.get("val") or 0
-                if val < MIN_TOP_VAL:
-                    filt_val += 1  # di bawah floor likuiditas — buang
-                    continue
-                rows.append((val, b))
-        # dedup per saham: satu saham bisa muncul di sisi buy & sell — nilai transaksi
-        # itu SAMA (matched, bukan dijumlah), jadi ambil val MAX per kode.
-        _best = {}
-        for _val, _b in rows:
-            _c = str(_b.get("code"))
-            if _c not in _best or _val > _best[_c][0]:
-                _best[_c] = (_val, _b)
-        rows = list(_best.values())
+        # Nilai per saham = JUMLAH buy+sell (kedua sisi beda nilainya, bukan "matched
+        # sama"). Filter pakai HASIL PENJUMLAHAN (fix 2026-10-05, user): dulu MAX satu
+        # sisi -> nilai kekecilan -> watchlist meleset dari protraderbot (PMP sudah total).
+        rows, filt_fmt, filt_val = _aggregate_top_values(items, MIN_TOP_VAL)
         # Beda-kan "API kosong" vs "semua kena filter" biar diagnosa akurat
         # (kasus 2026-08-26: top-stocks balik 50 item tapi 0 lolos karena
         # MIN_TOP_VAL=15B di market dry -> log lama nyasar "server di-clear?").
         if not rows and items:
             self._top_error = (
                 f"data API ada ({len(items)} item) tapi SEMUA dikeluarkan filter: "
-                f"{filt_fmt} bukan [A-Z]{4}, {filt_val} val < MIN_TOP_VAL({MIN_TOP_VAL:.0f})"
+                f"{filt_fmt} bukan [A-Z]{4}, {filt_val} kode total(buy+sell) < "
+                f"MIN_TOP_VAL({MIN_TOP_VAL:.0f})"
             )
-        rows.sort(key=lambda x: x[0], reverse=True)
-        return [b for _, b in rows[:n]]
+        return rows[:n]
 
     def intraday_history(self, code):
         """Harga intraday per menit (sesi terakhir, ~335 titik).
@@ -672,8 +692,10 @@ class ProfitsBot:
     def fetch_ohlc(self, code, interval="15m", range_="5d", min_bars=0):
         """OHLC multi-source (fallback chain):
 
-        1. Bot protrader API lokal (/chart/<CODE>) — OHLC ChartCloud POEMS real-time
-        2. Yahoo Finance .JK (delay ~10 menit) — kalau bot protrader mati
+        1. Bot protrader API lokal (/chart/<CODE>) — OHLC ChartCloud POEMS real-time.
+           SATU-SATUNYA sumber (2026-10-05 user): TIDAK fallback ke Yahoo (delay ~10 mnt
+           bikin sinyal beda dari jalur lain). Kalau api_server gak respons / balas error ->
+           log jelas + return error utk diagnosa (restart api_server vs backend Poems error).
         min_bars: utk scanning (adx_sma_pct 'last N bar') minta history cukup — kalau
         tidak, statistic bisa dihitung dari jendela pendek & melonjak (kasus VKTR).
         Return list dict {t: epoch, o,h,l,c, v} urut waktu / {error: ...}.
@@ -683,10 +705,15 @@ class ProfitsBot:
             hardcode 10 hari → D1 cuma 8 bar, M30 102 bar;
         (b) fallback Yahoo mencoba SEMUA range yang VALID utk TF-nya — dulu `1y`
             di TF intraday balas 422 dan LANGSUNG dianggap error (tanpa coba `1mo`).
+            [FALLBACK YAHOO DIBUANG 2026-10-05 — lihat di atas.]
         """
         import urllib.request, urllib.error
         need = max(28, int(min_bars or 0))
-        # 1) protrader api_server: OHLC asli ChartCloud POEMS
+        # 1) SATU-SATUNYA sumber sinyal = api_server protrader (/chart ChartCloud POEMS).
+        #    TIDAK fallback ke Yahoo (delay ~10 mnt -> sinyal beda dari bot lain, 2026-10-05
+        #    user). Kalau api_server gak respons / balas error -> log JELAS + return error
+        #    (bukan data basi). Restart api_server = start_api_server.bat (manual user, bukan
+        #    auto dari sini).
         res_map = {"1m": "1", "5m": "5", "15m": "15", "30m": "30", "45m": "45",
                    "60m": "60", "1h": "60", "1d": "D", "D": "D"}
         url = (f"{PROTRADER_API}/chart/{code}"
@@ -694,48 +721,35 @@ class ProfitsBot:
                f"&countback=2000&days_back={self._days_back_for(interval, need)}")
         req = urllib.request.Request(url, headers={"User-Agent": "profitsbot/1.0"})
         try:
-            with urllib.request.urlopen(req, timeout=25) as resp:
+            # socket timeout tidak menghitung server yang "diam tanpa kirim byte" -> pakai
+            # 10s supaya api_server yg ketahan (login SOAP/ChartCloud lambat) tidak nge-stall
+            # cycle menit-an (kasus 15 mnt 2026-10-05). Sehat tetap < 1s.
+            with urllib.request.urlopen(req, timeout=10) as resp:
                 d = json.loads(resp.read().decode())
-            rows = d.get("data")
-            # ChartCloud dingin/sepi bisa balik JUSTRU terlalu pendek (kasus MDIA:
-            # cuma 15 bar) padahal Yahoo punya 113 bar. Data < lookback SL (28)
-            # gak cukup utk Donchian/ADX -> jangan dipakai, turun ke fallback Yahoo.
-            # Kalau min_bars diset (scan), butuh bar sebanyak itu biar statistic valid.
-            if isinstance(rows, list) and len(rows) >= need:
-                return rows
-        except Exception:
-            pass
-        # 2) fallback Yahoo (delay) — range HARUS valid utk TF (Yahoo: intraday maks
-        #    ~60 hari; `1y`/`2y` hanya utk harian). Coba berurutan; error hanya
-        #    dikembalikan kalau SEMUA percobaan gagal.
-        intraday = interval.endswith("m") or interval in ("1h",)
-        cands = ["1mo", "5d", "1d"] if intraday else [range_ or "1y", "1y", "2y"]
-        last_err = None
-        for range_opt in cands:
-            url = (f"https://query1.finance.yahoo.com/v8/finance/chart/{code}.JK"
-                   f"?range={range_opt}&interval={interval}")
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            try:
-                with urllib.request.urlopen(req, timeout=20) as resp:
-                    r = json.loads(resp.read().decode())
-            except Exception as e:
-                last_err = f"{range_opt}: {e}"
-                continue
-            res = (r.get("chart", {}).get("result") or [])
-            if not res:
-                last_err = f"{range_opt}: kosong"
-                continue
-            ts = res[0].get("timestamp") or []
-            q = (res[0].get("indicators", {}).get("quote") or [{}])[0]
-            rows = []
-            for i in range(len(ts)):
-                if q["close"][i] is None:
-                    continue
-                rows.append({"t": ts[i], "o": q["open"][i], "h": q["high"][i],
-                             "l": q["low"][i], "c": q["close"][i], "v": q["volume"][i]})
-            if len(rows) >= need or range_opt == cands[-1]:
-                return rows
-        return {"error": last_err or "kosong"}
+        except Exception as e:
+            self.log(f"[API-SERVER] /chart {code} GAK RESPON ({type(e).__name__}: "
+                     f"{str(e)[:100]}) — restart api_server (start_api_server.bat) kalau "
+                     f"berkepanjangan; TIDAK pakai Yahoo (delay 10 mnt bikin sinyal beda).")
+            return {"error": f"API-SERVER-DOWN: {type(e).__name__}: {str(e)[:120]}",
+                    "code": code}
+        if not isinstance(d, dict):
+            self.log(f"[API-SERVER] /chart {code} respons aneh (bukan JSON object) — "
+                     f"restart api_server?")
+            return {"error": "API-SERVER-ANEH", "code": code}
+        rows = d.get("data")
+        if not isinstance(rows, list):
+            # api_server HIDUP tapi backend Poems/ChartCloud balas error/no-data — BUKAN
+            # masalah api_server, JANGAN restart api_server; cek backend/ChartCloud.
+            e_msg = str(d.get("error") or "no-data")[:120]
+            self.log(f"[API-SERVER] /chart {code} backend Poems/ChartCloud error: {e_msg} "
+                     f"(bukan api_server — jangan restart api_server).")
+            return {"error": e_msg, "code": code}
+        if len(rows) >= need:
+            return rows
+        # data < need utk scan -> bukan sinyal valid (bukan juga alasan restart api_server).
+        self.log(f"[API-SERVER] /chart {code} data kurang ({len(rows)} bar < need {need}) "
+                 f"— TIDAK pakai Yahoo; cek days_back/ChartCloud kuota bar.")
+        return {"error": f"data kurang ({len(rows)} bar < {need})", "code": code}
 
     def real_time_price(self, code, timeout=8):
         """Harga real-time multi-source (fallback chain):
