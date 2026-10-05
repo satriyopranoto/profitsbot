@@ -24,6 +24,28 @@ pc.load_env()  # ⚠️ WAJIB SEBELUM config dievaluasi — kalau tidak .env ngg
 from profits_ws import parse_price
 import indicators as ind
 
+
+def _fmt_top_side(d):
+    """Dict buy/sell utk log RAW top-values — val/vol/freq diberi pemisah ribuan.
+
+    Generic: semua key dict dipertahankan; int -> `{v:,}` (ribuan), float -> `{v:g}`,
+    bool/str -> repr aslinya. Contoh: val 87368672048 -> `'val': 87,368,672,048`,
+    vol 2912541294 -> `'vol': 2,912,541,294`, freq 4285 -> `'freq': 4,285`,
+    avg 29.9974 -> `'avg': 29.9974`. (Murni utk tampilan — tidak menyentuh data logika.)
+    """
+    if not d:
+        return "{}"
+    parts = []
+    for k, v in d.items():
+        if isinstance(v, int) and not isinstance(v, bool):
+            parts.append(f"'{k}': {v:,}")
+        elif isinstance(v, float):
+            parts.append(f"'{k}': {v:g}")
+        else:
+            parts.append(f"'{k}': {v!r}")
+    return "{" + ", ".join(parts) + "}"
+
+
 # ------------------------- konfigurasi -------------------------
 SYMBOLS = os.environ.get("PROFITS_SYMBOLS", "BBCA,BBRI,ANTM").split(",")
 PROTRADER_API = os.environ.get("PROTRADER_API", "http://127.0.0.1:8777")  # bot protrader (real-time PMP)
@@ -255,7 +277,8 @@ class ProfitsBot:
         try:
             self.log(f"[TOP-VALUES] RAW {len(items)} item dari {used or 'KOSONG'} (sebelum filter):")
             for _k, _it in enumerate(items[:15], 1):
-                self.log(f"  {_k:3}. buy={_it.get('buy')} sell={_it.get('sell')}")
+                self.log(f"  {_k:3}. buy={_fmt_top_side(_it.get('buy'))} "
+                         f"sell={_fmt_top_side(_it.get('sell'))}")
             if len(items) > 15:
                 self.log(f"  ... dan {len(items)-15} item lagi")
         except Exception as _e:
