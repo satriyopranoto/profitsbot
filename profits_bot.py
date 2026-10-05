@@ -412,7 +412,10 @@ class ProfitsBot:
         exits.sort(key=lambda z: -z["flat_pct"])
         return exits
 
-    def sl_donchian_price(self, code, interval="15m", dc_mult=2.8, dc_per=10):
+    # ⚠️ interval DEFAULT = SCAN_INTERVAL (TF live). Dulu "15m" (era TF 15m) -> pemanggil baru
+    # yang lupa mengisi interval dapat level dari TF SALAH (insiden 05-Okt-2026: SL PTBA
+    # terpasang dari M15 padahal bot pakai M30). Jalur bot sudah eksplisit SCAN_INTERVAL.
+    def sl_donchian_price(self, code, interval=SCAN_INTERVAL, dc_mult=2.8, dc_per=10):
         """SL Donchian high/low asli (paritas EA Strong / protraderbot donchian_sl).
 
         Lookback = dc_mult x dc_per bar. Utk posisi LONG: SL = min(low, lookback)
@@ -427,7 +430,8 @@ class ProfitsBot:
             return None
         return min(lows)
 
-    def sl_donchian_switch(self, code, interval="15m", dc_mult=2.8, dc_per=10):
+    # ⚠️ interval DEFAULT = SCAN_INTERVAL (TF live) — lihat catatan di sl_donchian_price.
+    def sl_donchian_switch(self, code, interval=SCAN_INTERVAL, dc_mult=2.8, dc_per=10):
         """SL SWITCH utk EXIT/TP-trailing (paritas protraderbot check_exit donchian_sl).
 
         sl = ac==1 ? s(lowest low) : r(highest high); ac = arah Donchian-breakout
@@ -1115,7 +1119,8 @@ class ProfitsBot:
         self.log(f"  !!! SL {code} GAGAL {n}x — posisi TANPA SL, reconcile_sl akan coba lagi")
         return False
 
-    def sl_donchian_plan(self, code, interval="15m"):
+    # ⚠️ interval DEFAULT = SCAN_INTERVAL (TF live) — lihat catatan di sl_donchian_price.
+    def sl_donchian_plan(self, code, interval=SCAN_INTERVAL):
         """SL plan — SATU formula dgn SL yang DIPASANG (paritas CR/protraderbot).
 
         lower = min(low, lookback) — LLV, sumber SAMA dengan `sl_donchian_price`

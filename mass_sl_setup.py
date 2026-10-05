@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """UTILITY (LIVE): pasang Stop Loss utk SEMUA holding profitsbot yang belum ber-SL.
 
-Kenapa: profitsbot TIDAK punya reconciliation SL otomatis => ada holding "yatim"
-tanpa SL (insiden 2026-08-25: cuma 4/10 holding ber-SL). Utility ini menambal:
+Kenapa: posisi bisa "yatim" tanpa SL (mis. PTBA 05-Okt-2026). Utility ini menambal:
 
   * Ambil posisi (portfolio/stock) + daftar SL aktif (automation/stoploss).
   * Posisi yang SUDAH ber-SL -> SKIP (tidak ditimpa).
-  * Posisi tanpa SL -> hitung SL Donchian 2.8x10 (min low M15 28 bar, paritas
-    EA Strong / protraderbot). Kalau OHLC n/a -> pakai level MANUAL (bila ada).
-  * SKIP kalau SL >= harga current (tembus -> langsung ke-trigger, sia-sia).
+  * Posisi tanpa SL -> hitung SL Donchian 2.8x10 = min(low, 28 bar) pada TF BOT
+    (`pb.SCAN_INTERVAL`, mis. 30m — BUKAN M15 hardcode) lalu trigger = 1 tick IDX
+    di bawahnya via `bot.sl_trigger()` (tick-aligned; paritas protraderbot next_tick_down).
+  * SKIP kalau trigger >= harga current (tembus -> langsung ke-trigger, sia-sia).
   * qty = lot (portfolio total // 100). kirim set_stop_loss(). Verifikasi ulang.
 
 PENTING qty = LOT (100 lembar) — VERIFIKASI LIVE (profits API).
@@ -18,16 +18,30 @@ Usage:
   python mass_sl_setup.py            # eksekusi LIVE utk posisi tanpa SL
 
 Manual override: ubah MANUAL di bawah (mis. {"DOOH": 288}) utk level tertentu
-yg OHLC-nya tak terbaca. [] = tidak ada override.
+yg OHLC-nya tak terbaca. {} = tidak ada override.
+
+RIWAYAT FIX (05-Okt-2026):
+  - TF: dulu hardcode "15m" -> level dari TF SALAH saat TF bot 30m (insiden SL PTBA:
+    M15 3120 vs M30 yang benar 3020). Kini `pb.SCAN_INTERVAL` (TF bot).
+  - Guard tembus: dulu `bot.price()` — METHOD ITU TIDAK ADA -> AttributeError ditelan
+    try/except -> `cur=0` -> guard `sl>=cur` SELALU LOLOS (SL tembus ikut terpasang).
+    Kini `bot.get_price()` (REST 24/7) → guard benar-benar bekerja.
+  - Trigger: dulu level LLV mentah (bisa bukan kelipatan tick, mis. 3130) -> kini
+    `bot.sl_trigger()` (round-down ke tick lalu -1 tick).
 """
-import os, sys, json  # noqa: F401
+import os
+import sys
+import json
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import profits_bot as pb  # noqa: E402
+import profits_bot as pb        # noqa: E402
+import indicators as ind        # noqa: E402
 
 # ===== konfigurasi =====
-DC_MULT, DC_PER = 2.8, 10          # Donchian lookback = DC_MULT x DC_PER bar (M15)
+DC_MULT, DC_PER = 2.8, 10          # Donchian lookback = DC_MULT x DC_PER bar (TF = pb.SCAN_INTERVAL)
+TF = pb.SCAN_INTERVAL              # ⚠️ TF BOT (jangan hardcode "15m")
 # level manual utk saham yg OHLC otomatis tak terbaca (ganti sesuai kebutuhan)
-MANUAL = {"DOOH": 288}             # contoh: DOOH 288 (approved user)
+MANUAL = {}                        # contoh: {"DOOH": 288} (approved user)
 # ========================
 
 
@@ -44,7 +58,8 @@ def run(dry_run):
     try:
         bot.login()
     except Exception as e:
-        print("login error:", e); sys.exit(1)
+        print("login error:", e)
+        sys.exit(1)
     bot.trade_login()
 
     # posisi + qty lot
@@ -58,7 +73,7 @@ def run(dry_run):
     have_sl = {s.get("code") for s in _norm(sls.get("data") or [])}
 
     mode = "DRY-RUN — tidak kirim order" if dry_run else "LIVE — order terkirim"
-    print(f"=== MASS SL SETUP ({mode}) ===")
+    print(f"=== MASS SL SETUP ({mode}) | TF={TF} (Donchian {DC_MULT}x{DC_PER} = {DC_MULT*DC_PER:g} bar) ===")
     print(f"  posisi: {len(qtys)} | sudah ber-SL (skip): {len(have_sl)}")
 
     # bangun rencana utk yg tanpa SL
@@ -66,25 +81,30 @@ def run(dry_run):
     for code in qtys:
         if code in have_sl:
             continue
-        sl = bot.sl_donchian_price(code, "15m", DC_MULT, DC_PER)
+        level = bot.sl_donchian_price(code, TF, DC_MULT, DC_PER)
         src = "Donchian"
-        if sl is None:
+        if level is None:
             if code in MANUAL:
-                sl, src = MANUAL[code], "MANUAL"
+                level, src = MANUAL[code], "MANUAL"
             else:
                 print(f"  {code:<6} OHLC n/a & tanpa override -> SKIP (butuh level manual)")
                 continue
-        # skip kalau tembus (SL >= current)
+        # trigger tick-aligned (1 tick di bawah level) — bukan level mentah
+        trig = bot.sl_trigger(level)
+        # skip kalau tembus (trigger >= current) — pakai get_price() (REST 24/7);
+        # ⚠️ JANGAN `bot.price()` (method tidak ada -> guard mati).
         try:
-            px = bot.price(code)
-        except Exception:
-            px = None
-        cur = (px or {}).get("last") or (px or {}).get("sellPrice") or (px or {}).get("price") or 0
-        if cur and sl >= cur:
-            print(f"  {code:<6} SL {sl} >= current {cur} (tembus) -> SKIP, butuh level manual")
+            px = bot.get_price(code) or {}
+        except Exception as e:
+            px = {}
+            print(f"  {code:<6} get_price error: {e}")
+        cur = px.get("current") or px.get("last") or 0
+        if cur and trig >= cur:
+            print(f"  {code:<6} trigger {trig} >= current {cur} (TEMBUS) -> SKIP, butuh level manual")
             continue
-        plan[code] = (sl, src)
-        print(f"  {code:<6} lot={qtys[code]:>5}  SL={sl}  ({src})")
+        plan[code] = (trig, src, level)
+        print(f"  {code:<6} lot={qtys[code]:>5}  level={level} (tick {ind.tick_size(int(level))}) "
+              f"-> trigger={trig}  current={cur}  [{src}]")
 
     if dry_run or not plan:
         print(f"\n  RENCANA: {len(plan)} posisi utk dipasang. (dry-run selesai, tidak kirim)")
@@ -92,7 +112,7 @@ def run(dry_run):
 
     print(f"\n  Eksekusi {len(plan)} posisi...")
     ok, fail = [], []
-    for code, (trig, _src) in plan.items():
+    for code, (trig, _src, _lvl) in plan.items():
         qty = qtys.get(code, 1)
         r = bot.set_stop_loss(code, trig, qty)
         rs = json.dumps(r, ensure_ascii=False)
