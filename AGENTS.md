@@ -127,6 +127,11 @@ Payload createOrder (TERVERIFIKASI LIVE 2026-08-12):
 - DATA PASAR (TERVERIFIKASI):
   GET /trade-book/trade-book/top-stocks -> [{buy:{code,curr,change,val,freq,lot,avg}, sell:{...}}]
     (50 item; sort val -> TOP VALUES 15)
+    ⚠️ **Top-value 05-Okt-2026**: nilai per SAHAM = **JUMLAH val buy+sell** (kedua sisi beda,
+    mis. GOTO buy 103,2B vs sell 26,6B) & filter `MIN_TOP_VAL` pakai HASIL JUMLAH — dulu ambil
+    MAX satu sisi -> nilai kekecilan -> watchlist meleset dari protraderbot/PMP. Implementasi:
+    `_aggregate_top_values()` + `test_top_aggregate.py`. Log RAW pakai pemisah ribuan
+    (`_fmt_top_side` + `test_top_raw_fmt.py`).
   GET /trade-book/chart/<CODE>/price?cursor=<ts> -> [{time:'HH:MM', price}] intraday per menit
     (sesi terakhir ~335 titik — utk indikator intraday)
   GET /trade-book/trade-book/<CODE>/chart|time -> depth/bid-offer per waktu
@@ -153,12 +158,18 @@ Payload createOrder (TERVERIFIKASI LIVE 2026-08-12):
 ## ARSITEKTUR DATA (fallback chain real-time)
 - Bot Profits tanya harga real-time -> bot PROTRADER (http://127.0.0.1:8777/price/<CODE>)
   — protraderbot/bot/api_server.py (PMP real-time: bid/ask/last) — timeout 8s.
-- Kalau bot protrader mati/nggak jawab -> fallback YAHOO .JK (delay ~10 menit).
-- `profits_bot.real_time_price(code)` -> {source: protrader|yahoo, bid, ask, last, vol, ts}.
+- OHLC chart (sumber SINYAL) = api_server `/chart` (ChartCloud POEMS). **Fallback Yahoo
+  DIBUANG 05-Okt-2026** (delay ~10 mnt -> sinyal beda dari jalur lain): kalau api_server
+  gak respons/error, `fetch_ohlc` LOG `[API-SERVER]` + return error ber-klasifikasi
+  (API-SERVER-DOWN = restart api_server | backend Poems error | data kurang) — TIDAK pakai
+  data basi. Timeout primary 10s (anti-stall; dulu 25s bisa molor menit-an).
+- `profits_bot.real_time_price(code)` -> {source: protrader | none, bid, ask, last, vol, ts}
+  (05-Okt-2026: Yahoo dibuang juga di jalur ini — api_server gak jawab -> source "none").
 - OHLC indikator -> bot PROTRADER juga: `fetch_ohlc(code)` = GET http://127.0.0.1:8777/chart/<CODE>
   ?resolution=<map>&countback=2000&days_back=10 -> {code, data:[{t,o,h,l,c,v}], bars}
-  (OHLC ChartCloud POEMS real-time — SUMBER UTAMA). Yahoo jadi fallback TERAKHIR kalau
-  api_server mati. Satu sumber = sinyal konsisten dgn protraderbot (TERVERIFIKASI 2026-08-19:
+  (OHLC ChartCloud POEMS real-time — SATU-SATUNYA sumber). Fallback Yahoo DIBUANG 05-Okt-2026
+  (delay ~10 mnt bikin sinyal beda); api_server mati/lambat -> log `[API-SERVER]` + error.
+  Satu sumber = sinyal konsisten dgn protraderbot (TERVERIFIKASI 2026-08-19:
   ISAT 147 bars, ADX 28.5/pct 24% ~= protraderbot 25.3/23%; sebelum fix Yahoo melenceng 3%
   -> 'Uptrend Kuat 69%' PALSU). ⚠️ api_server 8777 WAJIB jalan utk data akurat.
 
