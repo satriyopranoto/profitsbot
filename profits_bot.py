@@ -738,11 +738,20 @@ class ProfitsBot:
             return {"error": "API-SERVER-ANEH", "code": code}
         rows = d.get("data")
         if not isinstance(rows, list):
-            # api_server HIDUP tapi backend Poems/ChartCloud balas error/no-data — BUKAN
-            # masalah api_server, JANGAN restart api_server; cek backend/ChartCloud.
-            e_msg = str(d.get("error") or "no-data")[:120]
-            self.log(f"[API-SERVER] /chart {code} backend Poems/ChartCloud error: {e_msg} "
-                     f"(bukan api_server — jangan restart api_server).")
+            # api_server hidup tapi tidak menyajikan data — bedakan penyebabnya biar
+            # hulu (user/agent) tahu tindakan yang benar:
+            #   SESSION-NOT-AVAILABLE -> tunggu cycle autobot (api_server anti-kick)
+            #   LOGIN-BACKEND / BACKEND -> soal Poems/ChartCloud, bukan api_server
+            e_msg = str(d.get("error") or "no-data")[:160]
+            if "SESSION-NOT-AVAILABLE" in e_msg:
+                _hint = ("sesi store autobot kosong/stale — tunggu cycle autobot berikutnya "
+                         "(~3 mnt); api_server TIDAK login sendiri (anti-kick)")
+            elif "LOGIN-BACKEND" in e_msg:
+                _hint = "backend Poems login lambat/gagal — bukan api_server"
+            else:
+                _hint = ("backend Poems/ChartCloud (bukan api_server — "
+                         "jangan restart api_server)")
+            self.log(f"[API-SERVER] /chart {code} {e_msg} — {_hint}")
             return {"error": e_msg, "code": code}
         if len(rows) >= need:
             return rows
