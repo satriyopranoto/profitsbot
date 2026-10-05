@@ -161,8 +161,11 @@ Payload createOrder (TERVERIFIKASI LIVE 2026-08-12):
 - OHLC chart (sumber SINYAL) = api_server `/chart` (ChartCloud POEMS). **Fallback Yahoo
   DIBUANG 05-Okt-2026** (delay ~10 mnt -> sinyal beda dari jalur lain): kalau api_server
   gak respons/error, `fetch_ohlc` LOG `[API-SERVER]` + return error ber-klasifikasi
-  (API-SERVER-DOWN = restart api_server | backend Poems error | data kurang) — TIDAK pakai
-  data basi. Timeout primary 10s (anti-stall; dulu 25s bisa molor menit-an).
+  (commit `9f34616`): `SESSION-NOT-AVAILABLE` = sesi store autobot kosong/stale -> tunggu
+  cycle autobot (~3 mnt; api_server anti-kick, TIDAK login sendiri) · `LOGIN-BACKEND` =
+  Poems login lambat/gagal · `BACKEND` = ChartCloud/Poems umum (jangan restart api_server).
+  Juga: `API-SERVER-DOWN` (api_server tak jawab) & `data kurang (X bar < need)`.
+  TIDAK pakai data basi. Timeout primary 10s (anti-stall; dulu 25s bisa molor menit-an).
 - `profits_bot.real_time_price(code)` -> {source: protrader | none, bid, ask, last, vol, ts}
   (05-Okt-2026: Yahoo dibuang juga di jalur ini — api_server gak jawab -> source "none").
 - OHLC indikator -> bot PROTRADER juga: `fetch_ohlc(code)` = GET http://127.0.0.1:8777/chart/<CODE>
