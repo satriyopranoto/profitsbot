@@ -163,7 +163,10 @@ Payload createOrder (TERVERIFIKASI LIVE 2026-08-12):
   gak respons/error, `fetch_ohlc` LOG `[API-SERVER]` + return error ber-klasifikasi
   (commit `9f34616`): `SESSION-NOT-AVAILABLE` = sesi store autobot kosong/stale -> tunggu
   cycle autobot (~3 mnt; api_server anti-kick, TIDAK login sendiri) · `LOGIN-BACKEND` =
-  Poems login lambat/gagal · `BACKEND` = ChartCloud/Poems umum (jangan restart api_server).
+  Poems login lambat/gagal · `BACKEND` = ChartCloud/Poems umum (jangan restart api_server);
+  sub-pesan `BACKEND: COLD` / `HANDSHAKE-IN-PROGRESS` = pre-warm handshake `/v1` belum siap
+  (Poems lambat ~42s) -> ulangi cycle berikutnya, BUKAN tanda api_server mati (protraderbot
+  commit `9740947`: cache cookie + pre-warm thread).
   Juga: `API-SERVER-DOWN` (api_server tak jawab) & `data kurang (X bar < need)`.
   TIDAK pakai data basi. Timeout primary 10s (anti-stall; dulu 25s bisa molor menit-an).
 - `profits_bot.real_time_price(code)` -> {source: protrader | none, bid, ask, last, vol, ts}
