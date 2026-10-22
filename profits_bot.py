@@ -1415,6 +1415,7 @@ def run_loop(bot, cycle_minutes=CYCLE_MINUTES, interval=SCAN_INTERVAL,
                     _rsi = ind.get("rsi"); _sc = ind.get("cr_score")
                     _hb = ind.get("hbuy"); _hb1 = ind.get("hbuy1")
                     _ls = ind.get("lsell"); _ls1 = ind.get("lsell1")
+                    _dup = ind.get("dup"); _dlow = ind.get("dlow")
 
                     def _lv(v):
                         return "-" if v is None else format(v, ".0f")
@@ -1424,6 +1425,7 @@ def run_loop(bot, cycle_minutes=CYCLE_MINUTES, interval=SCAN_INTERVAL,
                         f"RSI={0 if _rsi is None else _rsi:.0f} "
                         f"hbuy1={_lv(_hb1)} hbuy={_lv(_hb)} "
                         f"lsell1={_lv(_ls1)} lsell={_lv(_ls)} "
+                        f"dup={_lv(_dup)}/dlow={_lv(_dlow)} "
                         f"last={ind.get('last', 0):.0f} "
                         f"skor={0 if _sc is None else _sc:+.1f} "
                         f"val={r.get('value', 0)/1e9:.2f}B")
