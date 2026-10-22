@@ -970,28 +970,33 @@ class ProfitsBot:
                     "interval": interval}
         o = [x["o"] for x in ohlc]; h = [x["h"] for x in ohlc]
         l = [x["l"] for x in ohlc]; c = [x["c"] for x in ohlc]
-        snap = cr.snapshot(o, h, l, c)
+        t = [x["t"] for x in ohlc]
+        snap = cr.snapshot(o, h, l, c, t=t)
         action, score, reasons = "HOLD", 0, []
         if snap["buyit"]:
             action, score = "BUY", 1
-            reasons.append(f"CR Buyit: close {_s(c[-1])} > hbuy[1] {_s(snap['hbuy1'])} "
-                           f"atau hbuy {_s(snap['hbuy'])}, "
+            reasons.append(f"CR Buyit: close {_s(c[-1])} > hbuy[2]/hbuy[1]/hbuy "
+                           f"({_s(snap['hbuy1'])}/{_s(snap['hbuy'])}), "
                            f"low > switch-SL {_s(snap['sl_sw'])}, "
-                           f"RSI {_s(snap['rsi'])} > {cr.RSI_BUYIT:g}")
+                           f"RSI {_s(snap['rsi'])} > {cr.RSI_BUYIT:g}, "
+                           f"close > DonchianD1-up {_s(snap['dup'])}")
         elif snap["shortit"]:
             action, score = "SHORT", 1
-            reasons.append(f"CR Shortit: close {_s(c[-1])} < lsell[1] {_s(snap['lsell1'])} "
-                           f"atau lsell {_s(snap['lsell'])}, "
+            reasons.append(f"CR Shortit: close {_s(c[-1])} < lsell[2]/lsell[1]/lsell "
+                           f"({_s(snap['lsell1'])}/{_s(snap['lsell'])}), "
                            f"high < switch-SL {_s(snap['sl_sw'])}, "
-                           f"RSI {_s(snap['rsi'])} < {cr.RSI_SHORTIT:g}")
+                           f"RSI {_s(snap['rsi'])} < {cr.RSI_SHORTIT:g}, "
+                           f"close < DonchianD1-low {_s(snap['dlow'])}")
         else:
             reasons.append(f"CR HOLD: RSI {_s(snap['rsi'])}, switch-SL {_s(snap['sl_sw'])}, "
                            f"hbuy[1] {_s(snap['hbuy1'])}/hbuy {_s(snap['hbuy'])}, "
                            f"lsell[1] {_s(snap['lsell1'])}/lsell {_s(snap['lsell'])}, "
+                           f"DonchianD1 {_s(snap['dup'])}/{_s(snap['dlow'])}, "
                            f"skor {_s(snap['score'], '{:+.1f}')}")
         ind_snap = {"last": c[-1], "sl": snap["sl_sw"], "rsi": snap["rsi"],
                     "hbuy": snap["hbuy"], "lsell": snap["lsell"],
                     "hbuy1": snap["hbuy1"], "lsell1": snap["lsell1"],
+                    "dup": snap["dup"], "dlow": snap["dlow"],
                     "cr_score": snap["score"], "adx_sma_pct": 0.0,
                     "trend_comment": f"CR (switch-SL {_s(snap['sl_sw'])})"}
         return {"code": code, "action": action, "score": score, "reasons": reasons,

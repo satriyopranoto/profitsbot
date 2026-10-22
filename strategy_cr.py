@@ -8,9 +8,16 @@ Sumber kebenaran definisi sinyal: Pine `candle_rejection_flip.pine`, EA
 `CandleRejection.mq4`, AFL `candle_rejection.afl`.
 
 Dipakai profitsbot saat `PROFITS_STRATEGY=cr`:
-- Buyit   = (close > hbuy[1]  or close > hbuy)  and low > sl  and RSI > RSI_BUYIT
-- Shortit = (close < lsell[1] or close < lsell) and high < sl and RSI < RSI_SHORTIT
+- Buyit   = (close > hbuy[2] or close > hbuy[1] or close > hbuy) and low > sl
+            and RSI > RSI_BUYIT and close > dupdaily
+- Shortit = (close < lsell[2] or close < lsell[1] or close < lsell) and high < sl
+            and RSI < RSI_SHORTIT and close < dlowdaily
   (di profitsbot: Shortit = pemicu EXIT LONG/FLIP — IDX cash-only tidak bisa short)
+- dupdaily/dlowdaily = Donchian DAILY (5,2) — anti-sideways ketat, parity Pine
+  22-Okt-2026: dupdaily = highest(high_daily,5)[2], dlowdaily = lowest(low_daily,5)[2],
+  memakai bar daily TERAKHIR YANG SUDAH TUTUP (lookahead_off). Dibentuk dari RESAMPLE
+  bar intraday via timestamps `t` (hari WIB). History harian < 7 hari → gate DILULUSKAN.
+  `t=None` → gate dilewati (pemanggil tanpa timestamps aman — paritas runner terjaga).
 - TP & SL TIDAK dihitung di sini: jalur profitsbot yang sudah ada dipakai, karena
   aturannya identik (jual bila `close < switch-SL` & floating > PROFITS_TP_PCT;
   SL dipasang band-bawah tick-aligned).
@@ -57,12 +64,33 @@ def cross_under(a_n, a_prev, b_n, b_prev):
 
 
 # ──────────────────────────────────────────────────────────
-def calc_candle_indicators(o, h, l, c):
+def calc_candle_indicators(o, h, l, c, t=None):
     n = len(c)
     o = np.asarray(o, float); h = np.asarray(h, float)
     l = np.asarray(l, float); c = np.asarray(c, float)
     eps = 0.001
     rng = eps + h - l
+
+    # ── Donchian DAILY (5,2) — parity Pine 22-Okt-2026 ───────────────────────
+    # dupdaily  = request.security("1D", highest(high,5)[2])  → lookahead_off =
+    # bar daily TERAKHIR YANG SUDAH TUTUP. Untuk TF intraday: base = hari SEBELUM
+    # bar ini, lalu [2] → jendela 5 hari daily H[-7:-2] / L[-7:-2] (relatif hari bar).
+    # Gate: Buyit butuh close > dupdaily, Shortit butuh close < dlowdaily.
+    # NaN (history harian < 7 hari) = gate DILULUSKAN — jangan blokir saat warm-up.
+    dup_daily = np.full(n, np.nan)
+    dlow_daily = np.full(n, np.nan)
+    if t is not None and len(t) == n:
+        _days = [int((int(x) + 7 * 3600) // 86400) for x in t]  # hari WIB (UTC+7, tanpa DST)
+        _dh = pd.Series(h).groupby(_days).max()
+        _dl = pd.Series(l).groupby(_days).min()
+        _dkeys = list(_dh.index)
+        _dpos = {d: i for i, d in enumerate(_dkeys)}
+        for i in range(n):
+            p = _dpos.get(_days[i])
+            if p is None or p < 7:
+                continue
+            dup_daily[i] = float(_dh.iloc[p - 7:p - 2].max())
+            dlow_daily[i] = float(_dl.iloc[p - 7:p - 2].min())
 
     lo3 = pd.Series(l).rolling(3).min().values
     lo7 = pd.Series(l).rolling(7).min().values
@@ -189,15 +217,22 @@ def calc_candle_indicators(o, h, l, c):
             if cu_l:
                 _lsellon = False
 
-        # --- entry signals (parity Pine/EA/AFL 25-Sep-2026) ---
+        # --- entry signals (parity Pine/EA/AFL 25-Sep-2026 + Donchian daily 22-Okt) ---
         # Trigger = PERBANDINGAN LEVEL mentah (cross 3-level 22-Sep DIPENSIUNKAN):
-        #   Buyit   = (close > hbuy[1]  or close > hbuy)  and low>sl  and RSI > RSI_BUYIT
-        #   Shortit = (close < lsell[1] or close < lsell) and high<sl and RSI < RSI_SHORTIT
+        #   Buyit   = (close > hbuy[2] or close > hbuy[1] or close > hbuy)
+        #             and low>sl and RSI > RSI_BUYIT and close > dupdaily
+        #   Shortit = (close < lsell[2] or close < lsell[1] or close < lsell)
+        #             and high<sl and RSI < RSI_SHORTIT and close < dlowdaily
         # Sinyal = KONDISI state (bisa True beruntun di banyak bar), bukan event 1-bar;
         # anti-duplikat dari gate posisi (MAX_POS) + gate switch-SL. NaN hbuy/lsell
         # (belum ada proxbuy/proxsell) otomatis bikin perbandingan False — parity Pine.
-        lvl_buy  = ((ci > H_s1) or (ci > _hbuy)) and (rsi_i > RSI_BUYIT)
-        lvl_sell = ((ci < LS_s1) or (ci < _lsell)) and (rsi_i < RSI_SHORTIT)
+        lvl_buy  = ((ci > H_s2) or (ci > H_s1) or (ci > _hbuy)) and (rsi_i > RSI_BUYIT)
+        lvl_sell = ((ci < LS_s2) or (ci < LS_s1) or (ci < _lsell)) and (rsi_i < RSI_SHORTIT)
+        # gate Donchian daily (5,2) — anti-sideways (NaN = lulus)
+        if not np.isnan(dup_daily[i]):
+            lvl_buy = lvl_buy and (ci > dup_daily[i])
+        if not np.isnan(dlow_daily[i]):
+            lvl_sell = lvl_sell and (ci < dlow_daily[i])
 
         if NO_LATCH:
             # User simplification (Sep-2026): no hbuyon/lsellon latch, no momentum gate.
@@ -218,7 +253,8 @@ def calc_candle_indicators(o, h, l, c):
         lsell_out[i] = _lsell; shortcl_out[i] = _shortcl
 
     return {'buyit': buyit, 'sellit': sellit, 'cl': cl_out, 'shortcl': shortcl_out,
-            'hbuy': hbuy_out, 'lsell': lsell_out, 'sl_sw': sl_sw_out, 'roc': roc}
+            'hbuy': hbuy_out, 'lsell': lsell_out, 'sl_sw': sl_sw_out, 'roc': roc,
+            'dup': dup_daily, 'dlow': dlow_daily}
 
 
 def _rsi_display(c):
@@ -236,7 +272,7 @@ def _rsi_display(c):
     return r
 
 
-def snapshot(o, h, l, c):
+def snapshot(o, h, l, c, t=None):
     """State sinyal CR di BAR TERAKHIR + level utk log & ranking.
 
     Return dict:
@@ -251,7 +287,7 @@ def snapshot(o, h, l, c):
       n             : jumlah bar yang dipakai
     """
     c = np.asarray(c, float)
-    ind = calc_candle_indicators(o, h, l, c)
+    ind = calc_candle_indicators(o, h, l, c, t=t)
 
     def _f(a):
         try:
@@ -280,6 +316,8 @@ def snapshot(o, h, l, c):
         "lsell": _f(ind["lsell"]),
         "hbuy1": _f1(ind["hbuy"]),
         "lsell1": _f1(ind["lsell"]),
+        "dup": _f(ind["dup"]),
+        "dlow": _f(ind["dlow"]),
         "rsi": _f(rsi),
         "score": score,
         "n": int(len(c)),
