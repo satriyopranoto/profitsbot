@@ -120,6 +120,8 @@ def calc_candle_indicators(o, h, l, c, t=None):
 
     buyit  = np.zeros(n, bool)
     sellit = np.zeros(n, bool)
+    buydraft   = np.zeros(n, bool)   # PARITAS Pine 22-Okt: mentah TANPA gate daily (utk FLIP)
+    shortdraft = np.zeros(n, bool)
     cl_out = np.full(n, np.nan); shortcl_out = np.full(n, np.nan)
     hbuy_out = np.full(n, np.nan); lsell_out = np.full(n, np.nan)
     sl_sw_out = np.full(n, np.nan)   # switch-SL line (SellIt exit, parity EA)
@@ -228,22 +230,30 @@ def calc_candle_indicators(o, h, l, c, t=None):
         # (belum ada proxbuy/proxsell) otomatis bikin perbandingan False — parity Pine.
         lvl_buy  = ((ci > H_s2) or (ci > H_s1) or (ci > _hbuy)) and (rsi_i > RSI_BUYIT)
         lvl_sell = ((ci < LS_s2) or (ci < LS_s1) or (ci < _lsell)) and (rsi_i < RSI_SHORTIT)
-        # gate Donchian daily (5,2) — anti-sideways (NaN = lulus)
+        # PARITAS Pine 22-Okt-2026: DRAFT = sinyal mentah (TANPA gate Donchian daily).
+        # ENTRY = draft + gate daily ; FLIP/REVERSAL = draft (tanpa gate daily).
+        lvl_buy_g  = lvl_buy
+        lvl_sell_g = lvl_sell
+        # gate Donchian daily (5,2) — anti-sideways (NaN = lulus) — HANYA untuk ENTRY
         if not np.isnan(dup_daily[i]):
-            lvl_buy = lvl_buy and (ci > dup_daily[i])
+            lvl_buy_g = lvl_buy_g and (ci > dup_daily[i])
         if not np.isnan(dlow_daily[i]):
-            lvl_sell = lvl_sell and (ci < dlow_daily[i])
+            lvl_sell_g = lvl_sell_g and (ci < dlow_daily[i])
 
         if NO_LATCH:
             # User simplification (Sep-2026): no hbuyon/lsellon latch, no momentum gate.
             # Gate switch-SL (17-Sep-2026, parity Pine/AFL/EA): buyit butuh low>sl,
             # shortit butuh high<sl. keep_buy/keep_sell = gate switch (True bila OFF/nan).
-            buyit[i]  = lvl_buy and keep_buy
-            sellit[i] = lvl_sell and keep_sell
+            buydraft[i]   = lvl_buy and keep_buy
+            shortdraft[i] = lvl_sell and keep_sell
+            buyit[i]  = lvl_buy_g and keep_buy
+            sellit[i] = lvl_sell_g and keep_sell
         else:
             # baseline A/B LAMA (CR_NO_LATCH=0): trigger sama, di-gate latch + momentum
-            buyit[i]  = ((lvl_buy and hbon_s1) or ((ci > _hbuy) and _mom_buy)) and keep_buy
-            sellit[i] = ((lvl_sell and lson_s1) or ((ci < _lsell) and _mom_sell)) and keep_sell
+            buydraft[i]   = ((lvl_buy and hbon_s1) or ((ci > _hbuy) and _mom_buy)) and keep_buy
+            shortdraft[i] = ((lvl_sell and lson_s1) or ((ci < _lsell) and _mom_sell)) and keep_sell
+            buyit[i]  = ((lvl_buy_g and hbon_s1) or ((ci > _hbuy) and _mom_buy)) and keep_buy
+            sellit[i] = ((lvl_sell_g and lson_s1) or ((ci < _lsell) and _mom_sell)) and keep_sell
 
         # roll s+2/s+3 registers
         _hbuy3, _lsell3 = H_s2, LS_s2
@@ -252,7 +262,8 @@ def calc_candle_indicators(o, h, l, c, t=None):
         hbuy_out[i] = _hbuy; cl_out[i] = _cl
         lsell_out[i] = _lsell; shortcl_out[i] = _shortcl
 
-    return {'buyit': buyit, 'sellit': sellit, 'cl': cl_out, 'shortcl': shortcl_out,
+    return {'buyit': buyit, 'sellit': sellit, 'buydraft': buydraft, 'shortdraft': shortdraft,
+            'cl': cl_out, 'shortcl': shortcl_out,
             'hbuy': hbuy_out, 'lsell': lsell_out, 'sl_sw': sl_sw_out, 'roc': roc,
             'dup': dup_daily, 'dlow': dlow_daily}
 
@@ -311,6 +322,8 @@ def snapshot(o, h, l, c, t=None):
     return {
         "buyit": bool(ind["buyit"][-1]),
         "shortit": bool(ind["sellit"][-1]),
+        "buydraft": bool(ind["buydraft"][-1]),
+        "shortdraft": bool(ind["shortdraft"][-1]),
         "sl_sw": _f(ind["sl_sw"]),
         "hbuy": _f(ind["hbuy"]),
         "lsell": _f(ind["lsell"]),
