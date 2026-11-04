@@ -165,6 +165,9 @@ UPTREND_MIN_PCT = float(os.environ.get("PROFITS_UPTREND_MIN_PCT", "35"))  # amba
 ADX_PCT_WINDOW = int(os.environ.get("PROFITS_ADX_PCT_WINDOW", "100"))  # jendela statistik (bar)
 ADX_PCT_MIN_BARS = int(os.environ.get("PROFITS_ADX_PCT_MIN_BARS", "60"))  # min bar valid utk dipercaya
 TP_PCT = float(os.environ.get("PROFITS_TP_PCT", "0.5"))  # exit check: floating profit > %
+# TP trigger (04-Nov-2026): dch52 = Donchian 5,2 chart TF (TP cepat, paritas EA);
+# switch = perilaku lama (switch-SL / LLV legacy).
+TP_MODE = os.environ.get("PROFITS_TP_MODE", "dch52").strip().lower()
 LOT_SIZE = 100  # 1 lot = 100 lembar
 MAINT_WINDOW = (22 * 60, 5)  # 22:00-00:05 WIB (server maintenance)
 
@@ -397,20 +400,45 @@ class ProfitsBot:
             flat_pct = (cur - avg) / avg * 100
             if flat_pct <= tp_pct:
                 continue  # syarat 1: floating > tp_pct
-            # syarat 2 (AND): close < SL DONCHIAN (trailing trigger).
-            # Switch SL (paritas protraderbot) saat aktif, else LLV legacy.
-            sl = (self.sl_donchian_switch(r["code"], SCAN_INTERVAL, dc_mult, dc_per)
-                  if PROFITS_SWITCH_SL
-                  else self.sl_donchian_price(r["code"], SCAN_INTERVAL, dc_mult, dc_per))
-            if sl is None:
-                continue  # SL n/a -> jangan jual (fail-safe)
-            if cur >= sl:
-                continue  # harga BELUM balik tembus SL -> HOLD
+            # syarat 2 (AND): close < trigger TP.
+            # TP_MODE=dch52 (DEFAULT 04-Nov-2026): Donchian 5,2 chart TF =
+            #   lowest(low,5)[2] (TP cepat, paritas EA CandleRejection).
+            # TP_MODE=switch: perilaku lama (switch-SL / LLV legacy).
+            if TP_MODE == "switch":
+                trig = (self.sl_donchian_switch(r["code"], SCAN_INTERVAL, dc_mult, dc_per)
+                        if PROFITS_SWITCH_SL
+                        else self.sl_donchian_price(r["code"], SCAN_INTERVAL, dc_mult, dc_per))
+                label = "switch-SL"
+            else:
+                trig = self.tp_dch52_low(r["code"], SCAN_INTERVAL)
+                label = "dch5.2"
+            if trig is None:
+                continue  # trigger n/a -> jangan jual (fail-safe)
+            if cur >= trig:
+                continue  # harga BELUM balik tembus trigger -> HOLD
             exits.append({"code": r["code"], "qty_lot": max(int(qty // 100), 1),
                           "price": cur, "avg": avg, "flat_pct": round(flat_pct, 2),
-                          "sl": round(sl)})
+                          "sl": round(trig), "tp_mode": label})
         exits.sort(key=lambda z: -z["flat_pct"])
         return exits
+
+    def tp_dch52_low(self, code, interval=SCAN_INTERVAL):
+        """Donchian 5,2 intraday utk TP cepat — lowest(low,5)[2] di chart TF.
+
+        [2] diukur dari bar TERTUTUP terakhir; window 5 bar = shift 3..7.
+        Return None kalau data kurang (fail-safe: JANGAN jual).
+        """
+        ohlc = self.fetch_ohlc(code, interval, "5d")
+        if isinstance(ohlc, dict) or len(ohlc) < 8:
+            return None
+        bars = ohlc[:-1]          # buang bar forming; bars[-1] = bar tertutup (shift 1)
+        win = bars[-7:-2]         # shift 3..7 (5 bar)
+        if len(win) < 5:
+            return None
+        lows = [x.get("l") for x in win]
+        if any(v is None for v in lows):
+            return None
+        return float(min(lows))
 
     # ⚠️ interval DEFAULT = SCAN_INTERVAL (TF live). Dulu "15m" (era TF 15m) -> pemanggil baru
     # yang lupa mengisi interval dapat level dari TF SALAH (insiden 05-Okt-2026: SL PTBA
@@ -1513,7 +1541,7 @@ def run_loop(bot, cycle_minutes=CYCLE_MINUTES, interval=SCAN_INTERVAL,
                                        dc_per=DONCHIAN_PERIOD)
                 if exits:
                     for e in exits:
-                        bot.log(f"EXIT TP {e['code']}: +{e['flat_pct']}% (avg {e['avg']:.0f} -> {e['price']:.0f}, sl {e['sl']})")
+                        bot.log(f"EXIT TP {e['code']}: +{e['flat_pct']}% (avg {e['avg']:.0f} -> {e['price']:.0f}, trig {e['sl']} [{e.get('tp_mode','dch5.2')}])")
                     if auto_execute:
                         plans = bot.execute_exits(exits, live=bot.live)
                         if plans:
