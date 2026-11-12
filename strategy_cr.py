@@ -13,11 +13,11 @@ Dipakai profitsbot saat `PROFITS_STRATEGY=cr`:
 - Shortit = (close < lsell[2] or close < lsell[1] or close < lsell) and high < sl
             and RSI < RSI_SHORTIT and close < dlowdaily
   (di profitsbot: Shortit = pemicu EXIT LONG/FLIP — IDX cash-only tidak bisa short)
-- dupdaily/dlowdaily = Donchian DAILY (5,2) — anti-sideways ketat, parity Pine
-  22-Okt-2026: dupdaily = highest(high_daily,5)[2], dlowdaily = lowest(low_daily,5)[2],
-  memakai bar daily TERAKHIR YANG SUDAH TUTUP (lookahead_off). Dibentuk dari RESAMPLE
-  bar intraday via timestamps `t` (hari WIB). History harian < 7 hari → gate DILULUSKAN.
-  `t=None` → gate dilewati (pemanggil tanpa timestamps aman — paritas runner terjaga).
+- dupdaily/dlowdaily = gate Donchian CHART TF (60,5) — 12-Nov-2026, ganti daily (5,2):
+  dupdaily = highest(high,60)[5], dlowdaily = lowest(low,60)[5] di TF chart,
+  dihitung dari bar chart itu sendiri (tanpa resample daily / timestamps `t`).
+  History < 65 bar → gate DILULUSKAN (tidak memblokir sinyal saat warm-up);
+  `t` tetap di signature tapi diabaikan (pemanggil lama aman).
 - TP & SL TIDAK dihitung di sini: jalur profitsbot yang sudah ada dipakai, karena
   aturannya identik (jual bila `close < switch-SL` & floating > PROFITS_TP_PCT;
   SL dipasang band-bawah tick-aligned).
@@ -43,6 +43,9 @@ SCORE_ROC = int(os.environ.get("PROFITS_CR_SCORE_ROC", "60"))        # skor rank
 # = perbandingan LEVEL mentah, tanpa latch hbuyon/lsellon & tanpa gate momentum.
 NO_LATCH = os.environ.get("PROFITS_CR_NO_LATCH", "1") == "1"
 USE_SWITCH = True      # gate switch-SL di proxbuy/proxsell (parity semua port)
+# Gate Donchian CHART TF (60,5) — 12-Nov-2026, ganti daily (5,2)
+GATE_LEN = int(os.environ.get("PROFITS_CR_GATE_LEN", "60"))
+GATE_SHIFT = int(os.environ.get("PROFITS_CR_GATE_SHIFT", "5"))
 
 
 # ── di bawah ini DI-EXTRACT dari runner (jangan edit manual) ────────────────────
@@ -71,26 +74,14 @@ def calc_candle_indicators(o, h, l, c, t=None):
     eps = 0.001
     rng = eps + h - l
 
-    # ── Donchian DAILY (5,2) — parity Pine 22-Okt-2026 ───────────────────────
-    # dupdaily  = request.security("1D", highest(high,5)[2])  → lookahead_off =
-    # bar daily TERAKHIR YANG SUDAH TUTUP. Untuk TF intraday: base = hari SEBELUM
-    # bar ini, lalu [2] → jendela 5 hari daily H[-7:-2] / L[-7:-2] (relatif hari bar).
-    # Gate: Buyit butuh close > dupdaily, Shortit butuh close < dlowdaily.
-    # NaN (history harian < 7 hari) = gate DILULUSKAN — jangan blokir saat warm-up.
-    dup_daily = np.full(n, np.nan)
-    dlow_daily = np.full(n, np.nan)
-    if t is not None and len(t) == n:
-        _days = [int((int(x) + 7 * 3600) // 86400) for x in t]  # hari WIB (UTC+7, tanpa DST)
-        _dh = pd.Series(h).groupby(_days).max()
-        _dl = pd.Series(l).groupby(_days).min()
-        _dkeys = list(_dh.index)
-        _dpos = {d: i for i, d in enumerate(_dkeys)}
-        for i in range(n):
-            p = _dpos.get(_days[i])
-            if p is None or p < 7:
-                continue
-            dup_daily[i] = float(_dh.iloc[p - 7:p - 2].max())
-            dlow_daily[i] = float(_dl.iloc[p - 7:p - 2].min())
+    # ── Gate Donchian CHART TF (60,5) — 12-Nov-2026 (paritas Pine/AFL/EA) ────
+    # dupdaily  = ta.highest(high,60)[5]  -> rolling(60).max().shift(5)
+    # dlowdaily = ta.lowest (low ,60)[5]  -> rolling(60).min().shift(5)
+    # Dihitung di TF chart (bukan resample daily); NaN (bar < len+shift) = gate
+    # DILULUSKAN — jangan blokir saat warm-up. `t` tidak dipakai lagi (dibiarkan
+    # di signature supaya pemanggil lama tetap kompatibel).
+    dup_daily = pd.Series(h).rolling(GATE_LEN).max().shift(GATE_SHIFT).values
+    dlow_daily = pd.Series(l).rolling(GATE_LEN).min().shift(GATE_SHIFT).values
 
     lo3 = pd.Series(l).rolling(3).min().values
     lo7 = pd.Series(l).rolling(7).min().values
@@ -120,7 +111,7 @@ def calc_candle_indicators(o, h, l, c, t=None):
 
     buyit  = np.zeros(n, bool)
     sellit = np.zeros(n, bool)
-    buydraft   = np.zeros(n, bool)   # PARITAS Pine 22-Okt: mentah TANPA gate daily (utk FLIP)
+    buydraft   = np.zeros(n, bool)   # PARITAS Pine: mentah TANPA gate (utk FLIP)
     shortdraft = np.zeros(n, bool)
     cl_out = np.full(n, np.nan); shortcl_out = np.full(n, np.nan)
     hbuy_out = np.full(n, np.nan); lsell_out = np.full(n, np.nan)
@@ -219,7 +210,7 @@ def calc_candle_indicators(o, h, l, c, t=None):
             if cu_l:
                 _lsellon = False
 
-        # --- entry signals (parity Pine/EA/AFL 25-Sep-2026 + Donchian daily 22-Okt) ---
+        # --- entry signals (parity Pine/EA/AFL 25-Sep-2026 + gate chart TF 60,5) ---
         # Trigger = PERBANDINGAN LEVEL mentah (cross 3-level 22-Sep DIPENSIUNKAN):
         #   Buyit   = (close > hbuy[2] or close > hbuy[1] or close > hbuy)
         #             and low>sl and RSI > RSI_BUYIT and close > dupdaily
@@ -230,11 +221,11 @@ def calc_candle_indicators(o, h, l, c, t=None):
         # (belum ada proxbuy/proxsell) otomatis bikin perbandingan False — parity Pine.
         lvl_buy  = ((ci > H_s2) or (ci > H_s1) or (ci > _hbuy)) and (rsi_i > RSI_BUYIT)
         lvl_sell = ((ci < LS_s2) or (ci < LS_s1) or (ci < _lsell)) and (rsi_i < RSI_SHORTIT)
-        # PARITAS Pine 22-Okt-2026: DRAFT = sinyal mentah (TANPA gate Donchian daily).
-        # ENTRY = draft + gate daily ; FLIP/REVERSAL = draft (tanpa gate daily).
+        # PARITAS Pine: DRAFT = sinyal mentah (TANPA gate Donchian).
+        # ENTRY = draft + gate chart TF (60,5) ; FLIP/REVERSAL = draft (tanpa gate).
         lvl_buy_g  = lvl_buy
         lvl_sell_g = lvl_sell
-        # gate Donchian daily (5,2) — anti-sideways (NaN = lulus) — HANYA untuk ENTRY
+        # gate Donchian CHART TF (60,5) — anti-sideways (NaN = lulus) — HANYA untuk ENTRY
         if not np.isnan(dup_daily[i]):
             lvl_buy_g = lvl_buy_g and (ci > dup_daily[i])
         if not np.isnan(dlow_daily[i]):

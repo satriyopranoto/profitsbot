@@ -23,6 +23,10 @@ CODES = ["BBCA", "BBRI", "PGAS", "UNTR", "ICBP", "ALII", "PTBA", "ASII",
 os.environ["CR_SCORE_ROC"] = "60"
 os.environ["PROFITS_CR_SCORE_ROC"] = "60"
 
+# Gate entry bot = chart TF (60,5); runner backtest MASIH daily (5,2) — set
+# CR_GATE_MATCH_RUNNER=1 hanya kalau runner sudah disamakan ke (60,5).
+GATE_MATCH = os.environ.get("CR_GATE_MATCH_RUNNER", "0") == "1"
+
 import strategy_cr as S  # noqa: E402
 
 
@@ -87,22 +91,32 @@ for kode in CODES:
 
     a = R.calc_candle_indicators(o, hh, ll, c)
     b = S.calc_candle_indicators(o, hh, ll, c)
-    res = {
+    res = {"buyit": None, "sellit": None} if not GATE_MATCH else {
         "buyit": cmp_arr(kode, "buyit", a["buyit"], b["buyit"]),
         "sellit": cmp_arr(kode, "sellit", a["sellit"], b["sellit"]),
+    }
+    res.update({
         "sl_sw": cmp_arr(kode, "sl_sw", a["sl_sw"], b["sl_sw"]),
         "hbuy": cmp_arr(kode, "hbuy", a["hbuy"], b["hbuy"]),
         "lsell": cmp_arr(kode, "lsell", a["lsell"], b["lsell"]),
         "roc": cmp_arr(kode, "roc", a["roc"], b["roc"]),
-    }
+    })
+    if "buydraft" in a:
+        res["buydraft"] = cmp_arr(kode, "buydraft", a["buydraft"], b["buydraft"])
+        res["shortdraft"] = cmp_arr(kode, "shortdraft", a["shortdraft"], b["shortdraft"])
+    else:
+        res["buydraft"] = res["shortdraft"] = None
     snap = S.snapshot(o, hh, ll, c)
-    snap_ok = (snap["buyit"] == bool(a["buyit"][-1]) and snap["shortit"] == bool(a["sellit"][-1])
-               and abs((snap["sl_sw"] or 0) - (_f(a["sl_sw"]) or 0)) < 1e-9)
+    snap_ok = abs((snap["sl_sw"] or 0) - (_f(a["sl_sw"]) or 0)) < 1e-9
+    if GATE_MATCH:
+        snap_ok = snap_ok and snap["buyit"] == bool(a["buyit"][-1]) and snap["shortit"] == bool(a["sellit"][-1])
     if not snap_ok:
         FAIL.append(f"{kode}:snapshot")
-    row = " ".join(("OK" if res[k] else "BEDA").rjust(7 if k != "hbuy" and k != "lsell" else 6)
+    row = " ".join(("N/A".rjust(7) if res[k] is None else ("OK" if res[k] else "BEDA").rjust(7))
                    for k in ("buyit", "sellit", "sl_sw", "hbuy", "lsell", "roc"))
-    print(f"{kode:6} {len(c):>6} {row}  {'OK' if snap_ok else 'BEDA':>20}")
+    draft_ok = None if res["buydraft"] is None else bool(res["buydraft"] and res["shortdraft"])
+    print(f"{kode:6} {len(c):>6} {row}  {'OK' if snap_ok else 'BEDA':>9}  "
+          f"{'N/A' if draft_ok is None else ('OK' if draft_ok else 'BEDA'):>6}")
 
 print()
 if FAIL:
