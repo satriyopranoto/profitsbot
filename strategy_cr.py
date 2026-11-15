@@ -8,16 +8,13 @@ Sumber kebenaran definisi sinyal: Pine `candle_rejection_flip.pine`, EA
 `CandleRejection.mq4`, AFL `candle_rejection.afl`.
 
 Dipakai profitsbot saat `PROFITS_STRATEGY=cr`:
-- Buyit   = (close > hbuy[2] or close > hbuy[1] or close > hbuy) and low > sl
-            and RSI > RSI_BUYIT and close > dupdaily
-- Shortit = (close < lsell[2] or close < lsell[1] or close < lsell) and high < sl
-            and RSI < RSI_SHORTIT and close < dlowdaily
+- Buydraft   = low > sl and RSI > RSI_BUYIT      (trigger level hbuy DIHAPUS 13-Nov-2026)
+- Shortdraft = high < sl and RSI < RSI_SHORTIT
   (di profitsbot: Shortit = pemicu EXIT LONG/FLIP — IDX cash-only tidak bisa short)
-- dupdaily/dlowdaily = gate Donchian CHART TF (60,5) — 12-Nov-2026, ganti daily (5,2):
-  dupdaily = highest(high,60)[5], dlowdaily = lowest(low,60)[5] di TF chart,
-  dihitung dari bar chart itu sendiri (tanpa resample daily / timestamps `t`).
-  History < 65 bar → gate DILULUSKAN (tidak memblokir sinyal saat warm-up);
-  `t` tetap di signature tapi diabaikan (pemanggil lama aman).
+- Buyit  = Buydraft and (close>dup OR (close<dup AND 2*close-sl < dup))
+- Shortit= Shortdraft and (close<dlow OR (close>dlow AND 2*close-sl > dlow))
+- dupdaily/dlowdaily = Donchian DAILY (5,2): highest(high_d,5)[2] / lowest(low_d,5)[2]
+  pada hari bursa WIB; history < 7 hari → gate DILULUSKAN.
 - TP & SL TIDAK dihitung di sini: jalur profitsbot yang sudah ada dipakai, karena
   aturannya identik (jual bila `close < switch-SL` & floating > PROFITS_TP_PCT;
   SL dipasang band-bawah tick-aligned).
@@ -43,9 +40,6 @@ SCORE_ROC = int(os.environ.get("PROFITS_CR_SCORE_ROC", "60"))        # skor rank
 # = perbandingan LEVEL mentah, tanpa latch hbuyon/lsellon & tanpa gate momentum.
 NO_LATCH = os.environ.get("PROFITS_CR_NO_LATCH", "1") == "1"
 USE_SWITCH = True      # gate switch-SL di proxbuy/proxsell (parity semua port)
-# Gate Donchian CHART TF (60,5) — 12-Nov-2026, ganti daily (5,2)
-GATE_LEN = int(os.environ.get("PROFITS_CR_GATE_LEN", "60"))
-GATE_SHIFT = int(os.environ.get("PROFITS_CR_GATE_SHIFT", "5"))
 
 
 # ── di bawah ini DI-EXTRACT dari runner (jangan edit manual) ────────────────────
@@ -74,14 +68,27 @@ def calc_candle_indicators(o, h, l, c, t=None):
     eps = 0.001
     rng = eps + h - l
 
-    # ── Gate Donchian CHART TF (60,5) — 12-Nov-2026 (paritas Pine/AFL/EA) ────
-    # dupdaily  = ta.highest(high,60)[5]  -> rolling(60).max().shift(5)
-    # dlowdaily = ta.lowest (low ,60)[5]  -> rolling(60).min().shift(5)
-    # Dihitung di TF chart (bukan resample daily); NaN (bar < len+shift) = gate
-    # DILULUSKAN — jangan blokir saat warm-up. `t` tidak dipakai lagi (dibiarkan
-    # di signature supaya pemanggil lama tetap kompatibel).
-    dup_daily = pd.Series(h).rolling(GATE_LEN).max().shift(GATE_SHIFT).values
-    dlow_daily = pd.Series(l).rolling(GATE_LEN).min().shift(GATE_SHIFT).values
+    # ── Gate Donchian DAILY (5,2) + ruang target 1:1 — 13-Nov-2026 ───────────
+    # dupdaily  = request.security("1D", highest(high,5)[2])  → lookahead_off =
+    # bar daily TERAKHIR YANG SUDAH TUTUP. Untuk TF intraday: base = hari SEBELUM
+    # bar ini, lalu [2] → jendela 5 hari daily H[-7:-2] / L[-7:-2] (relatif hari bar).
+    # Gate entry: (a) close > dupdaily (breakout), ATAU (b) close < dupdaily TAPI
+    # target 1:1 (2*close-sl) masih di bawah dupdaily. Shortit mirror.
+    # NaN (history harian < 7 hari) = gate DILULUSKAN — jangan blokir saat warm-up.
+    dup_daily = np.full(n, np.nan)
+    dlow_daily = np.full(n, np.nan)
+    if t is not None and len(t) == n:
+        _days = [int((int(x) + 7 * 3600) // 86400) for x in t]  # hari WIB (UTC+7, tanpa DST)
+        _dh = pd.Series(h).groupby(_days).max()
+        _dl = pd.Series(l).groupby(_days).min()
+        _dkeys = list(_dh.index)
+        _dpos = {d: i for i, d in enumerate(_dkeys)}
+        for i in range(n):
+            p = _dpos.get(_days[i])
+            if p is None or p < 7:
+                continue
+            dup_daily[i] = float(_dh.iloc[p - 7:p - 2].max())
+            dlow_daily[i] = float(_dl.iloc[p - 7:p - 2].min())
 
     lo3 = pd.Series(l).rolling(3).min().values
     lo7 = pd.Series(l).rolling(7).min().values
@@ -210,41 +217,38 @@ def calc_candle_indicators(o, h, l, c, t=None):
             if cu_l:
                 _lsellon = False
 
-        # --- entry signals (parity Pine/EA/AFL 25-Sep-2026 + gate chart TF 60,5) ---
-        # Trigger = PERBANDINGAN LEVEL mentah (cross 3-level 22-Sep DIPENSIUNKAN):
-        #   Buyit   = (close > hbuy[2] or close > hbuy[1] or close > hbuy)
-        #             and low>sl and RSI > RSI_BUYIT and close > dupdaily
-        #   Shortit = (close < lsell[2] or close < lsell[1] or close < lsell)
-        #             and high<sl and RSI < RSI_SHORTIT and close < dlowdaily
-        # Sinyal = KONDISI state (bisa True beruntun di banyak bar), bukan event 1-bar;
-        # anti-duplikat dari gate posisi (MAX_POS) + gate switch-SL. NaN hbuy/lsell
-        # (belum ada proxbuy/proxsell) otomatis bikin perbandingan False — parity Pine.
-        lvl_buy  = ((ci > H_s2) or (ci > H_s1) or (ci > _hbuy)) and (rsi_i > RSI_BUYIT)
-        lvl_sell = ((ci < LS_s2) or (ci < LS_s1) or (ci < _lsell)) and (rsi_i < RSI_SHORTIT)
-        # PARITAS Pine: DRAFT = sinyal mentah (TANPA gate Donchian).
-        # ENTRY = draft + gate chart TF (60,5) ; FLIP/REVERSAL = draft (tanpa gate).
-        lvl_buy_g  = lvl_buy
-        lvl_sell_g = lvl_sell
-        # gate Donchian CHART TF (60,5) — anti-sideways (NaN = lulus) — HANYA untuk ENTRY
+        # --- entry signals — paritas Pine/AFL/EA 13-Nov-2026 ---------------------
+        # DRAFT (dipakai FLIP) = gate switch-SL + gate RSI saja. Trigger perbandingan
+        # level hbuy/lsell DIHAPUS (Pine & AFL meng-comment-nya 13-Nov).
+        # ENTRY = draft + gate Donchian DAILY (5,2) dengan aturan ruang target 1:1.
+        # NaN dup/dlow (warm-up) = gate DILULUSKAN (paritas EA/Visual).
+        lvl_buy  = (rsi_i > RSI_BUYIT)
+        lvl_sell = (rsi_i < RSI_SHORTIT)
+
+        sl_i = sl_sw_out[i]
+        gate_buy = True
+        gate_sell = True
         if not np.isnan(dup_daily[i]):
-            lvl_buy_g = lvl_buy_g and (ci > dup_daily[i])
+            _d1 = dup_daily[i]
+            gate_buy = (ci > _d1) or (ci < _d1 and (2.0 * ci - sl_i) < _d1)
         if not np.isnan(dlow_daily[i]):
-            lvl_sell_g = lvl_sell_g and (ci < dlow_daily[i])
+            _d2 = dlow_daily[i]
+            gate_sell = (ci < _d2) or (ci > _d2 and (2.0 * ci - sl_i) > _d2)
 
         if NO_LATCH:
-            # User simplification (Sep-2026): no hbuyon/lsellon latch, no momentum gate.
-            # Gate switch-SL (17-Sep-2026, parity Pine/AFL/EA): buyit butuh low>sl,
-            # shortit butuh high<sl. keep_buy/keep_sell = gate switch (True bila OFF/nan).
+            # no hbuyon/lsellon latch, no momentum gate (paritas Pine aktif).
             buydraft[i]   = lvl_buy and keep_buy
             shortdraft[i] = lvl_sell and keep_sell
-            buyit[i]  = lvl_buy_g and keep_buy
-            sellit[i] = lvl_sell_g and keep_sell
+            buyit[i]  = buydraft[i] and gate_buy
+            sellit[i] = shortdraft[i] and gate_sell
         else:
-            # baseline A/B LAMA (CR_NO_LATCH=0): trigger sama, di-gate latch + momentum
-            buydraft[i]   = ((lvl_buy and hbon_s1) or ((ci > _hbuy) and _mom_buy)) and keep_buy
-            shortdraft[i] = ((lvl_sell and lson_s1) or ((ci < _lsell) and _mom_sell)) and keep_sell
-            buyit[i]  = ((lvl_buy_g and hbon_s1) or ((ci > _hbuy) and _mom_buy)) and keep_buy
-            sellit[i] = ((lvl_sell_g and lson_s1) or ((ci < _lsell) and _mom_sell)) and keep_sell
+            # baseline A/B LAMA (CR_NO_LATCH=0): trigger level + latch/momentum (legacy).
+            lvl_old_buy  = ((ci > H_s2) or (ci > H_s1) or (ci > _hbuy)) and (rsi_i > RSI_BUYIT)
+            lvl_old_sell = ((ci < LS_s2) or (ci < LS_s1) or (ci < _lsell)) and (rsi_i < RSI_SHORTIT)
+            buydraft[i]   = ((lvl_old_buy and hbon_s1) or ((ci > _hbuy) and _mom_buy)) and keep_buy
+            shortdraft[i] = ((lvl_old_sell and lson_s1) or ((ci < _lsell) and _mom_sell)) and keep_sell
+            buyit[i]  = buydraft[i] and gate_buy
+            sellit[i] = shortdraft[i] and gate_sell
 
         # roll s+2/s+3 registers
         _hbuy3, _lsell3 = H_s2, LS_s2
