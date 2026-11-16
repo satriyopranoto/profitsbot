@@ -1028,6 +1028,7 @@ class ProfitsBot:
                     "cr_score": snap["score"], "adx_sma_pct": 0.0,
                     "trend_comment": f"CR (switch-SL {_s(snap['sl_sw'])})"}
         return {"code": code, "action": action, "score": score, "reasons": reasons,
+                "buyit": snap["buyit"], "shortit": snap["shortit"],
                 "buydraft": snap["buydraft"], "shortdraft": snap["shortdraft"],
                 "ind": ind_snap, "interval": interval}
 
@@ -1258,9 +1259,9 @@ class ProfitsBot:
             pass
         executed = []
         for r in results:
-            # Jangan buang sinyal FLIP: kalau posisi sudah ada & draft-short aktif,
+            # Jangan buang sinyal FLIP: kalau posisi sudah ada & Shortit (gated) aktif,
             # lewati cabang BUY (anti-numpuk akan `continue`) supaya cabang FLIP mengeksekusi exit.
-            _flip_hold = bool(r.get("shortdraft")) and r["code"] in positions
+            _flip_hold = bool(r.get("shortit")) and r["code"] in positions
             if r["action"] == "BUY" and r["score"] >= min_score and not _flip_hold:
                 code = r["code"]
                 # ditandai di scan (harga < MIN_PRICE) — jangan dibeli
@@ -1339,13 +1340,14 @@ class ProfitsBot:
                         # Pasang SL SEGERA (paritas protraderbot/usbot) — jangan tunggu
                         # reconcile cycle berikutnya. reconcile_sl tetap jaring pengaman.
                         self.install_sl_now(code, sl_price, qty_lot)
-            elif r.get("shortdraft") and r["score"] >= min_score:
+            elif r.get("shortit") and r["score"] >= min_score:
                 code = r["code"]
-                # FLIP off -> sinyal SHORT DRAFT TIDAK dieksekusi (exit hanya TP)
+                # FLIP off -> sinyal SHORTIT TIDAK dieksekusi (exit hanya TP)
                 if not FLIP:
-                    self.log(f"[SKIP] {code} sinyal Shortdraft tapi FLIP off — exit hanya TP (fl>0.5% & close<SL)")
+                    self.log(f"[SKIP] {code} sinyal Shortit tapi FLIP off — exit hanya TP (fl>0.5% & close<SL)")
                     continue
-                # Paritas Pine 22-Okt: FLIP pakai DRAFT (tanpa gate Donchian daily)
+                # FLIP 13-Nov-2026 = sinyal SHORTIT lengkap (switch-SL + RSI + gate Donchian
+                # daily & ruang 1:1); draft tidak lagi memicu exit long.
                 # sinyal SHORT = pemicu EXIT LONG (IDX cash-only: ga bisa short beneran)
                 # -> jual posisi yang dipunya; kalau tidak punya -> skip
                 if code not in positions:
