@@ -140,6 +140,10 @@ RSI_BUY_MIN = float(os.environ.get("PROFITS_RSI_BUY_MIN", "70"))
 RSI_SELL_MAX = float(os.environ.get("PROFITS_RSI_SELL_MAX", "30"))
 # --- mode & eksekusi ---
 BOT_MODE = os.environ.get("PROFITS_BOT_MODE", "nontrade").lower()  # nontrade|trade
+# 16-Nov-2026: fallback PROFITS_SYMBOLS TIDAK BOLEH dipakai saat trading — daftar itu
+# tidak melewati filter MIN_TOP_VAL (kasus BBRI 16-Nov: 173B < 300B tapi tetap dibeli).
+ALLOW_SYMBOL_FALLBACK = (os.environ.get("PROFITS_ALLOW_SYMBOL_FALLBACK", "0")
+                         .strip().lower() in ("1", "true", "yes", "on"))
 TRADE_LOT = int(os.environ.get("PROFITS_TRADE_LOT", "0"))  # lot/order (0 = sizing CAPITAL/RISK)
 TEST_SYMBOL = os.environ.get("PROFITS_TEST_SYMBOL", "").upper()  # test cycle langsung di saham ini
 USE_FLIP = os.environ.get("PROFITS_FLIP", os.environ.get("PROFITS_USE_FLIP", "1")) == "1"
@@ -1043,13 +1047,24 @@ class ProfitsBot:
         src = "inline"
         if codes is None:
             tv = self.top_values(TOP_VALUES) or []
-            codes = [b["code"] for b in tv] or SYMBOLS
-            values = {b["code"]: b.get("val", 0) for b in tv}
-            src = "top-stocks(Profits)" if tv else "SYMBOLS fallback"
-            if not tv and not getattr(self, "_fb_warned", False):
-                self._fb_warned = True
-                why = getattr(self, "_top_error", "") or "data kosong (server di-clear?)"
-                self.log(f"top-stocks kosong/gagal ({why}) — fallback ke SYMBOLS")
+            if tv:
+                codes = [b["code"] for b in tv]
+                values = {b["code"]: b.get("val", 0) for b in tv}
+                src = "top-stocks(Profits)"
+            else:
+                _why = getattr(self, "_top_error", "") or "tidak ada kode lolos filter"
+                # Fallback PROFITS_SYMBOLS tidak melewati MIN_TOP_VAL -> JANGAN dipakai
+                # untuk trading (16-Nov-2026; kasus BBRI 173B < 300B tetap dibeli).
+                if BOT_MODE == "trade" and not ALLOW_SYMBOL_FALLBACK:
+                    self.log(f"[SCAN] SKIP cycle: 0 kode lolos watchlist ({_why}) — "
+                             f"fallback SYMBOLS diblokir saat BOT_MODE=trade "
+                             f"(set PROFITS_ALLOW_SYMBOL_FALLBACK=1 utk paksa)")
+                    return []
+                codes = SYMBOLS
+                src = "SYMBOLS fallback"
+                if not getattr(self, "_fb_warned", False):
+                    self._fb_warned = True
+                    self.log(f"top-stocks kosong/gagal ({_why}) — fallback ke SYMBOLS (nontrade/testing)")
         # transparansi scanner ala protraderbot: tampilkan SUMBER + daftar watchlist
         # yang di-scan, biar jelas scan dari top-values (bukan "dari thin air").
         self.log(f"[SCAN] watchlist {len(codes)} saham dari {src}")
