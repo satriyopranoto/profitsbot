@@ -147,6 +147,9 @@ ALLOW_SYMBOL_FALLBACK = (os.environ.get("PROFITS_ALLOW_SYMBOL_FALLBACK", "0")
 TRADE_LOT = int(os.environ.get("PROFITS_TRADE_LOT", "0"))  # lot/order (0 = sizing CAPITAL/RISK)
 TEST_SYMBOL = os.environ.get("PROFITS_TEST_SYMBOL", "").upper()  # test cycle langsung di saham ini
 USE_FLIP = os.environ.get("PROFITS_FLIP", os.environ.get("PROFITS_USE_FLIP", "1")) == "1"
+# MAX POSITIONS (16-Nov-2026): batas jumlah posisi terbuka. Sinyal BUY baru
+# DILEWATI kalau slot penuh; exit/FLIP posisi lama tetap dieksekusi.
+MAX_POSITIONS = int(os.environ.get("MAX_POSITIONS", "4"))   # 0 = tanpa batas
 CYCLE_MINUTES = float(os.environ.get("PROFITS_CYCLE_MINUTES", "3"))  # loop scan (menit)
 AUTO_EXECUTE = (BOT_MODE == "trade")  # otomatis: nontrade = scan&log; trade = eksekusi real
 MARKET_HOURS = os.environ.get("PROFITS_MARKET_HOURS", "0") == "1"  # 0 = 24 jam (testing); 1 = cuma jam bursa
@@ -1265,6 +1268,26 @@ class ProfitsBot:
             positions = {r["code"]: r for r in f.get("rows", [])}
         except Exception:
             positions = {}
+        # MAX POSITIONS (16-Nov-2026): slot = holding nyata + order BUY pending.
+        # Batas hanya utk BUY baru; cabang FLIP/exit posisi lama tetap jalan.
+        _max_pos = MAX_POSITIONS
+        _n_pending = 0
+        if _max_pos > 0:
+            try:
+                _ords = (self.get_orders() or {}).get("data") or []
+                for _o in _ords:
+                    _is_buy = (_o.get("isBuy") is True
+                               or str(_o.get("side") or _o.get("action") or "").upper() == "BUY")
+                    _st = str(_o.get("status") or "").upper()
+                    _code_o = _o.get("code")
+                    if _is_buy and _code_o not in positions and _st not in ("DONE", "FILLED", "CANCELLED", "WITHDRAWN", "REJECTED"):
+                        _n_pending += 1
+            except Exception as _e:
+                self.log(f"  (gagal baca order pending utk MAX_POSITIONS: {_e})")
+        _n_open = len(positions) + _n_pending
+        if _max_pos > 0:
+            self.log(f"POSISI: {len(positions)} holding + {_n_pending} pending BUY "
+                     f"= {_n_open}/{_max_pos} slot")
         # sisa cash utk guard akumulasi (total order plan <= cash!)
         cash_left = None
         try:
@@ -1279,6 +1302,10 @@ class ProfitsBot:
             _flip_hold = bool(r.get("shortit")) and r["code"] in positions
             if r["action"] == "BUY" and r["score"] >= min_score and not _flip_hold:
                 code = r["code"]
+                if _max_pos > 0 and _n_open >= _max_pos:
+                    self.log(f"[SKIP] {code} posisi MAX ({_n_open}/{_max_pos}) "
+                             f"— tidak tambah posisi (exit/flip tetap jalan)")
+                    continue
                 # ditandai di scan (harga < MIN_PRICE) — jangan dibeli
                 if r.get("price_skip"):
                     continue
@@ -1348,6 +1375,8 @@ class ProfitsBot:
                                         order_type="limit")
                 if plan:
                     executed.append(plan)
+                    if _max_pos > 0:
+                        _n_open += 1
                     if sl_price:
                         plan["sl_donchian"] = sl_price
                         self.log(f"  SL plan {code}: trigger {sl_price} "
