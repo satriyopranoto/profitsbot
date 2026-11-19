@@ -1029,6 +1029,7 @@ class ProfitsBot:
                            f"DonchianD1 {_s(snap['dup'])}/{_s(snap['dlow'])}, "
                            f"skor {_s(snap['score'], '{:+.1f}')}")
         ind_snap = {"last": c[-1], "sl": snap["sl_sw"], "rsi": snap["rsi"],
+                    "high": h[-1],   # paritas Pine: exit long kalau high < switch-SL
                     "hbuy": snap["hbuy"], "lsell": snap["lsell"],
                     "hbuy1": snap["hbuy1"], "lsell1": snap["lsell1"],
                     "dup": snap["dup"], "dlow": snap["dlow"],
@@ -1299,7 +1300,13 @@ class ProfitsBot:
         for r in results:
             # Jangan buang sinyal FLIP: kalau posisi sudah ada & Shortit (gated) aktif,
             # lewati cabang BUY (anti-numpuk akan `continue`) supaya cabang FLIP mengeksekusi exit.
-            _flip_hold = bool(r.get("shortit")) and r["code"] in positions
+            # 19-Nov-2026 (paritas Pine/EA): exit long juga kalau bar tertutup SELURUHNYA
+            # di bawah switch-SL (high < sl) -> keluar saja, TANPA short.
+            _r_ind = r.get("ind") or {}
+            _r_sl = _r_ind.get("sl"); _r_hi = _r_ind.get("high")
+            _exit_beyond = (_r_sl is not None and _r_hi is not None and _r_hi < _r_sl)
+            _exit_long = bool(r.get("shortit")) or _exit_beyond
+            _flip_hold = _exit_long and r["code"] in positions
             if r["action"] == "BUY" and r["score"] >= min_score and not _flip_hold:
                 code = r["code"]
                 if _max_pos > 0 and _n_open >= _max_pos:
@@ -1384,11 +1391,11 @@ class ProfitsBot:
                         # Pasang SL SEGERA (paritas protraderbot/usbot) — jangan tunggu
                         # reconcile cycle berikutnya. reconcile_sl tetap jaring pengaman.
                         self.install_sl_now(code, sl_price, qty_lot)
-            elif r.get("shortit") and r["score"] >= min_score:
+            elif _exit_long and r["score"] >= min_score:
                 code = r["code"]
                 # FLIP off -> sinyal SHORTIT TIDAK dieksekusi (exit hanya TP)
                 if not FLIP:
-                    self.log(f"[SKIP] {code} sinyal Shortit tapi FLIP off — exit hanya TP (fl>0.5% & close<SL)")
+                    self.log(f"[SKIP] {code} sinyal exit (Shortit/high<SL) tapi FLIP off — exit hanya TP (fl>0.5% & close<SL)")
                     continue
                 # FLIP 13-Nov-2026 = sinyal SHORTIT lengkap (switch-SL + RSI + gate Donchian
                 # daily & ruang 1:1); draft tidak lagi memicu exit long.
